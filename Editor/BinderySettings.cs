@@ -24,8 +24,10 @@ namespace Bindery
     {
         const string AssetPath = "ProjectSettings/BinderySettings.asset";
         public const string DefaultSuffix = "View";
+        public const string DefaultTransparentPrefix = "~";
 
         [SerializeField] string classSuffix = DefaultSuffix;
+        [SerializeField] string transparentPrefix = DefaultTransparentPrefix;
 
         static BinderySettings _instance;
 
@@ -55,6 +57,11 @@ namespace Bindery
         /// <summary>Suffix appended to the GameObject name to form the generated class name,
         /// sanitized to identifier-legal characters (falls back to "View" if empty/garbage).</summary>
         public static string ClassSuffix => Sanitize(Instance.classSuffix, DefaultSuffix);
+
+        /// <summary>Name prefix that marks a GameObject as a transparent wrapper — it surfaces
+        /// nothing and its children are promoted to its level. Used verbatim (not sanitized); an
+        /// empty value turns the feature off (no node is ever treated as transparent).</summary>
+        public static string TransparentPrefix => Instance.transparentPrefix ?? "";
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.
@@ -97,6 +104,27 @@ namespace Bindery
                     if (GUILayout.Button("Reset to default (\"View\")", GUILayout.Width(220)))
                     {
                         s.classSuffix = DefaultSuffix;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
+
+                    EditorGUI.BeginChangeCheck();
+                    string nextPrefix = EditorGUILayout.DelayedTextField(
+                        new GUIContent("Transparent prefix",
+                            "A child whose name starts with this is treated as a transparent wrapper: " +
+                            "it generates nothing and its children are promoted to its level " +
+                            "(e.g. \"~Row\" → its buttons appear directly on the parent). Empty turns it off."),
+                        s.transparentPrefix);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.transparentPrefix = nextPrefix;
+                        Save();
+                    }
+
+                    if (GUILayout.Button("Reset to default (\"~\")", GUILayout.Width(220)))
+                    {
+                        s.transparentPrefix = DefaultTransparentPrefix;
                         Save();
                     }
 

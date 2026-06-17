@@ -46,6 +46,7 @@ namespace Bindery
             bool wroteAsmdef = WriteIfChanged(GenRoot + "/Bindery.Generated.asmdef", BinderyCodeGen.EmitAsmdef());
 
             string suffix = BinderySettings.ClassSuffix;
+            string transparentPrefix = BinderySettings.TransparentPrefix;
             bool queued = false;
             var seen = new HashSet<int>();
             foreach (var go in roots)
@@ -65,7 +66,7 @@ namespace Bindery
                     continue;
                 }
 
-                var model = BinderyHierarchy.Build(go, suffix);
+                var model = BinderyHierarchy.Build(go, suffix, transparentPrefix);
                 if (model.members.Count == 0)
                 {
                     Debug.LogWarning($"[Bindery] '{go.name}' has no bindable built-in uGUI children — nothing to generate.");

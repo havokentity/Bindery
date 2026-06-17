@@ -94,6 +94,10 @@ view.Footer.OkButton.onClick.AddListener(Apply);   // nested container → neste
 - **Containers become scopes.** A child that holds no bindable component but
   *contains* bindable descendants turns into a nested `…Scope` class (typed
   `RectTransform`) you reach through — `view.Footer.OkButton`.
+- **`~`-prefixed nodes are transparent.** Prefix a GameObject's name with `~` and it
+  generates *nothing* — its children are promoted to its level. A layout-only
+  `~ButtonRow` gives you `view.OkButton`, not `view.ButtonRow.OkButton`. (On a leaf it
+  just means "skip this one.") The prefix is configurable — see *Settings*.
 - **TextMeshPro is surfaced as `TMP_Text`** so the accessor works for any TMP text.
 - **Names become C# identifiers**, casing preserved; collisions inside a view get
   `_2` / `_3` suffixes (with a console warning).
@@ -132,6 +136,21 @@ The suffix is sanitized to identifier-legal characters, so generation never prod
 an invalid class name. It's stored in `ProjectSettings/BinderySettings.asset` — commit
 that file and the whole team shares one suffix (it's a project setting, not a per-user
 preference).
+
+**Project Settings ▸ Bindery ▸ Transparent prefix** — a name prefix (default `~`) that
+marks a GameObject as a transparent wrapper. The node generates nothing and its children
+are promoted to its level, so a layout-only container stays out of the API:
+
+```text
+SettingsPanel                 SettingsPanel
+└── ~ButtonRow        ⇒       ├── (ButtonRow: no field, no scope)
+    ├── OkButton              ├── OkButton      → view.OkButton
+    └── CancelButton          └── CancelButton  → view.CancelButton
+```
+
+It composes recursively (nested `~` wrappers collapse), the marker is never part of an
+identifier, and the wired references still point at the real child objects. Set the prefix
+empty to turn the feature off. Stored in the same project settings asset.
 
 ## Install
 

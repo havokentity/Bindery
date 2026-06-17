@@ -2,6 +2,14 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.4.0] — 2026-06-17
+
+- **Transparent wrappers.** A GameObject whose name starts with the transparent prefix
+  (default `~`, configurable in `Project Settings ▸ Bindery`) generates nothing itself and
+  its children are promoted to its level — so a layout-only `~ButtonRow` yields
+  `view.OkButton` instead of `view.ButtonRow.OkButton`. The marker is stripped from names,
+  composes recursively, and (on a leaf/control) doubles as an "exclude this" marker.
+
 ## [0.3.0] — 2026-06-17
 
 - **Unity 6 compatibility.** Dropped the explicit `com.unity.textmeshpro` dependency
