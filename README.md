@@ -21,8 +21,8 @@ real built-in uGUI controls underneath — `Button`, `Toggle`, `Slider`, `Dropdo
 **attaches that component to the object and wires every reference for you**, so the
 view is ready in the Inspector with nothing left to drag.
 
-No Figma. No reflection at runtime. No string-keyed `Find`. Every accessor is a
-plain field read against a `[SerializeField]` reference resolved at edit time.
+No reflection at runtime. No string-keyed `Find`. Every accessor is a plain field
+read against a `[SerializeField]` reference resolved at edit time.
 
 > [!TIP]
 > ### ⚡ The whole loop
