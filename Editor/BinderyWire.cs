@@ -68,19 +68,15 @@ namespace Bindery
             if (set.views.Count == 0) return;
 
             var remaining = new List<PView>();
-            bool dirty = false;
             foreach (var v in set.views)
             {
                 var type = ResolveType(v.typeName);
                 if (type == null) { remaining.Add(v); continue; }     // not compiled yet — retry next reload
                 if (!Wire(v, type)) { remaining.Add(v); continue; }   // target not resolvable yet
-                dirty = true;
             }
 
             set.views = remaining;
             Save(set);
-            if (dirty && !Application.isPlaying)
-                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         }
 
         static bool Wire(PView v, Type type)
@@ -89,8 +85,12 @@ namespace Bindery
             if (rootGo == null) return false;
 
             var comp = rootGo.GetComponent(type);
-            if (comp == null) comp = rootGo.AddComponent(type);
-            if (comp == null) return false;
+            if (comp == null)
+            {
+                comp = rootGo.AddComponent(type);
+                if (comp == null) return false;
+                WarnStaleViews(rootGo, type);
+            }
 
             var so = new SerializedObject(comp);
             foreach (var m in v.members)
@@ -101,7 +101,26 @@ namespace Bindery
             }
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(comp);
+            // Mark the object's OWN scene dirty (correct under multi-scene editing and in
+            // prefab mode, where rootGo.scene is the prefab stage's preview scene) so the
+            // wired references are saved. SetDirty alone doesn't flag a scene for saving.
+            if (!Application.isPlaying && rootGo.scene.IsValid())
+                EditorSceneManager.MarkSceneDirty(rootGo.scene);
             return true;
+        }
+
+        // After attaching a freshly-generated view, point out any older generated view still
+        // on the object (e.g. left behind by a rename or a class-suffix change) — it's no
+        // longer wired and is safe to remove.
+        static void WarnStaleViews(GameObject go, Type keep)
+        {
+            foreach (var v in go.GetComponents<BinderyView>())
+            {
+                if (v == null || v.GetType() == keep) continue;
+                Debug.LogWarning($"[Bindery] '{go.name}' still carries an older generated view " +
+                    $"'{v.GetType().Name}'. It is no longer wired — remove it if the object was " +
+                    "renamed or the view-class suffix changed.", go);
+            }
         }
 
         static UnityEngine.Object ResolveReference(PMember m)

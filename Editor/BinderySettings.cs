@@ -1,31 +1,60 @@
 // =============================================================================
-// Bindery — user settings. The generated class name is the GameObject's name plus
-// a configurable suffix (default "View"): "SettingsPanel" + "View" → SettingsPanelView,
-// or set it to "Blah" → SettingsPanelBlah. Edit it under
-//   Preferences ▸ Bindery ▸ View class suffix
-// Stored in EditorPrefs (per machine/user). The suffix is sanitized to identifier-
-// legal characters on read, so generation never produces an invalid class name.
+// Bindery — PROJECT settings. The generated class name is the GameObject's name
+// plus a configurable suffix (default "View"): "SettingsPanel" + "View" →
+// SettingsPanelView, or set it to "Blah" → SettingsPanelBlah. Edit it under
+//   Project Settings ▸ Bindery ▸ View class suffix
+//
+// Stored as a ScriptableObject serialized to ProjectSettings/BinderySettings.asset
+// — committed to source control and shared by everyone on the project (NOT per-user
+// EditorPrefs). It lives in ProjectSettings/ rather than Assets/ because Bindery is
+// installed as an immutable package and so can't hold settings inside its own folder.
+// The suffix is sanitized to identifier-legal characters on read, so generation
+// never produces an invalid class name.
 // =============================================================================
 
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEngine;
 
 namespace Bindery
 {
-    internal static class BinderySettings
+    internal sealed class BinderySettings : ScriptableObject
     {
-        const string SuffixKey = "Bindery.ClassSuffix";
+        const string AssetPath = "ProjectSettings/BinderySettings.asset";
         public const string DefaultSuffix = "View";
+
+        [SerializeField] string classSuffix = DefaultSuffix;
+
+        static BinderySettings _instance;
+
+        /// <summary>The single project-wide settings object, loaded from (or defaulted for)
+        /// ProjectSettings/BinderySettings.asset.</summary>
+        internal static BinderySettings Instance
+        {
+            get
+            {
+                if (_instance != null) return _instance;
+
+                var loaded = InternalEditorUtility.LoadSerializedFileAndForget(AssetPath);
+                _instance = loaded != null && loaded.Length > 0 ? loaded[0] as BinderySettings : null;
+                if (_instance == null)
+                {
+                    _instance = CreateInstance<BinderySettings>();
+                    _instance.classSuffix = DefaultSuffix;
+                }
+                _instance.hideFlags = HideFlags.HideAndDontSave;
+                return _instance;
+            }
+        }
+
+        static void Save() =>
+            InternalEditorUtility.SaveToSerializedFileAndForget(new Object[] { Instance }, AssetPath, true);
 
         /// <summary>Suffix appended to the GameObject name to form the generated class name,
         /// sanitized to identifier-legal characters (falls back to "View" if empty/garbage).</summary>
-        public static string ClassSuffix
-        {
-            get => Sanitize(EditorPrefs.GetString(SuffixKey, DefaultSuffix), DefaultSuffix);
-            set => EditorPrefs.SetString(SuffixKey, value ?? "");
-        }
+        public static string ClassSuffix => Sanitize(Instance.classSuffix, DefaultSuffix);
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.
@@ -42,28 +71,39 @@ namespace Bindery
         [SettingsProvider]
         static SettingsProvider Create()
         {
-            return new SettingsProvider("Preferences/Bindery", SettingsScope.User)
+            return new SettingsProvider("Project/Bindery", SettingsScope.Project)
             {
                 label = "Bindery",
                 guiHandler = _ =>
                 {
+                    var s = Instance;
                     EditorGUI.indentLevel++;
                     EditorGUILayout.LabelField("Code generation", EditorStyles.boldLabel);
 
-                    string current = EditorPrefs.GetString(SuffixKey, DefaultSuffix);
                     EditorGUI.BeginChangeCheck();
-                    string next = EditorGUILayout.TextField(
+                    string next = EditorGUILayout.DelayedTextField(
                         new GUIContent("View class suffix",
                             "Appended to the GameObject name to form the generated class name. " +
                             "\"View\" → SettingsPanelView,  \"Blah\" → SettingsPanelBlah."),
-                        current);
+                        s.classSuffix);
                     if (EditorGUI.EndChangeCheck())
-                        EditorPrefs.SetString(SuffixKey, next);
+                    {
+                        s.classSuffix = next;
+                        Save();
+                    }
 
                     EditorGUILayout.LabelField(" ", "Preview:  SettingsPanel" + Sanitize(next, DefaultSuffix));
 
                     if (GUILayout.Button("Reset to default (\"View\")", GUILayout.Width(220)))
-                        EditorPrefs.SetString(SuffixKey, DefaultSuffix);
+                    {
+                        s.classSuffix = DefaultSuffix;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
+                    EditorGUILayout.HelpBox(
+                        "Stored in ProjectSettings/BinderySettings.asset — commit it to share the " +
+                        "suffix across the team.", MessageType.None);
 
                     EditorGUI.indentLevel--;
                 },

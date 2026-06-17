@@ -14,7 +14,7 @@
 //   {
 //       protected override void OnBind()
 //       {
-//           okButton.onClick.AddListener(() => Debug.Log("clicked"));
+//           OkButton.onClick.AddListener(() => Debug.Log("clicked"));
 //       }
 //   }
 // =============================================================================
@@ -23,7 +23,10 @@ using UnityEngine;
 
 namespace Bindery
 {
-    [DisallowMultipleComponent]
+    // Deliberately NOT [DisallowMultipleComponent]: that attribute also blocks DIFFERENT
+    // subclasses, so renaming the object (or changing the class-name suffix) and regenerating
+    // could not attach the new view next to the old one. Bindery already reuses an existing
+    // same-type component instead of duplicating it, so the attribute bought nothing here.
     public abstract class BinderyView : MonoBehaviour
     {
         bool _bound;

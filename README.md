@@ -30,7 +30,7 @@ plain field read against a `[SerializeField]` reference resolved at edit time.
 > 1.  Select a GameObject / Canvas in the Hierarchy
 > 2.  Right-click ▸ Bindery ▸ Generate Accessor Class   (or Tools ▸ Bindery ▸ …)
 > 3.  A <Name>View component appears on the object, references filled in
-> 4.  Use it from code:  view.okButton.onClick.AddListener(...)
+> 4.  Use it from code:  view.OkButton.onClick.AddListener(...)
 > ```
 
 ---
@@ -48,37 +48,41 @@ SettingsPanel          ← selected
     └── CancelButton   (Button)
 ```
 
-Bindery generates `SettingsPanelView.g.cs`:
+Bindery generates `SettingsPanelView.g.cs` (accessor names mirror the GameObject names,
+casing preserved):
 
 ```csharp
 public partial class SettingsPanelView : Bindery.BinderyView
 {
-    [SerializeField] TMPro.TMP_Text   _title;
-    [SerializeField] UnityEngine.UI.Slider _volumeSlider;
-    [SerializeField] UnityEngine.RectTransform _footer;
-    FooterScope _footerScope;
+    [SerializeField] TMPro.TMP_Text _Title;
+    [SerializeField] UnityEngine.UI.Slider _VolumeSlider;
+    [SerializeField] UnityEngine.RectTransform _Footer;
+    FooterScope _FooterScope;
+    [SerializeField] UnityEngine.UI.Button _OkButton;
+    [SerializeField] UnityEngine.UI.Button _CancelButton;
 
-    public TMPro.TMP_Text title        => _title;
-    public UnityEngine.UI.Slider volumeSlider => _volumeSlider;
-    public FooterScope Footer          => _footerScope ??= new FooterScope(this);
+    public TMPro.TMP_Text Title => _Title;
+    public UnityEngine.UI.Slider VolumeSlider => _VolumeSlider;
+    public FooterScope Footer => _FooterScope ??= new FooterScope(this);
 
     public sealed class FooterScope
     {
         readonly SettingsPanelView _view;
         internal FooterScope(SettingsPanelView view) { _view = view; }
-        public RectTransform RectTransform => _view._footer;
-        public UnityEngine.UI.Button OkButton     => _view._okButton;
-        public UnityEngine.UI.Button CancelButton => _view._cancelButton;
+        public RectTransform RectTransform => _view._Footer;
+        public GameObject GameObject => _view._Footer != null ? _view._Footer.gameObject : null;
+        public UnityEngine.UI.Button OkButton => _view._OkButton;
+        public UnityEngine.UI.Button CancelButton => _view._CancelButton;
     }
 }
 ```
 
 …attaches `SettingsPanelView` to the `SettingsPanel` GameObject, and fills
-`_title`, `_volumeSlider`, `_footer`, `_okButton`, `_cancelButton` automatically.
+`_Title`, `_VolumeSlider`, `_Footer`, `_OkButton`, `_CancelButton` automatically.
 
 ```csharp
-view.title.text = "Settings";
-view.volumeSlider.value = 0.8f;
+view.Title.text = "Settings";
+view.VolumeSlider.value = 0.8f;
 view.Footer.OkButton.onClick.AddListener(Apply);   // nested container → nested scope
 ```
 
@@ -115,7 +119,7 @@ your `.cs` is left alone, and the live references are re-wired.
 
 ## Settings
 
-**Preferences ▸ Bindery ▸ View class suffix** — the generated class name is the
+**Project Settings ▸ Bindery ▸ View class suffix** — the generated class name is the
 GameObject's name plus this suffix (default `View`):
 
 | GameObject | suffix | class |
@@ -125,15 +129,22 @@ GameObject's name plus this suffix (default `View`):
 | `SettingsPanel` | `Bindings` | `SettingsPanelBindings` |
 
 The suffix is sanitized to identifier-legal characters, so generation never produces
-an invalid class name.
+an invalid class name. It's stored in `ProjectSettings/BinderySettings.asset` — commit
+that file and the whole team shares one suffix (it's a project setting, not a per-user
+preference).
 
 ## Install
 
-Unity **2022.3+**, with **uGUI** and **TextMeshPro** present (both are default).
+Unity **2022.3+**, with **uGUI** and **TextMeshPro** present.
 
 - **Package Manager ▸ Add package from git URL…**
   `https://github.com/havokentity/Bindery.git`
 - or clone into your project's `Packages/` folder.
+
+Bindery depends on `com.unity.ugui`. **TextMeshPro** comes from there automatically on
+**Unity 6** (TMP was folded into `com.unity.ugui` 2.x). On **Unity 2022.3**, TMP is the
+separate `com.unity.textmeshpro` package — present in new projects by default; add it via
+the Package Manager if your project doesn't already have it.
 
 Generated output lands in `Assets/Bindery/Generated/` under its own
 `Bindery.Generated` assembly definition, referenceable from your own asmdefs.

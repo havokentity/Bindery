@@ -19,7 +19,15 @@ namespace Bindery
         const string GenRoot = "Assets/Bindery/Generated";
 
         [MenuItem("GameObject/Bindery/Generate Accessor Class", false, 30)]
-        static void GenerateFromHierarchy() => Generate(Selection.gameObjects);
+        static void GenerateFromHierarchy(MenuCommand command)
+        {
+            // Unity invokes a GameObject/ menu command ONCE PER SELECTED OBJECT (each passed
+            // as command.context). Generate already processes the whole selection in one pass,
+            // so collapse those N invocations to a single run on the first selected object.
+            var sel = Selection.gameObjects;
+            if (command.context is GameObject ctx && sel.Length > 1 && ctx != sel[0]) return;
+            Generate(sel);
+        }
 
         [MenuItem("GameObject/Bindery/Generate Accessor Class", true)]
         static bool ValidateFromHierarchy() => Selection.activeGameObject != null;
@@ -46,6 +54,14 @@ namespace Bindery
                 if (!go.scene.IsValid())
                 {
                     Debug.LogWarning($"[Bindery] '{go.name}' is a project asset, not a scene object — open it in a scene first. Skipped.");
+                    continue;
+                }
+
+                // A control (Button/Toggle/Slider/…) is a leaf: pointing Bindery at one would
+                // otherwise surface its internal label/handle as members. Refuse it instead.
+                if (BinderyTypeMap.Classify(go, out _) == BindKind.Control)
+                {
+                    Debug.LogWarning($"[Bindery] '{go.name}' is itself a uGUI control — a control is a leaf with nothing to bind inside it. Select a container or panel instead. Skipped.");
                     continue;
                 }
 
