@@ -113,6 +113,20 @@ public partial class SettingsPanelView
 Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewritten,
 your `.cs` is left alone, and the live references are re-wired.
 
+## Settings
+
+**Preferences ▸ Bindery ▸ View class suffix** — the generated class name is the
+GameObject's name plus this suffix (default `View`):
+
+| GameObject | suffix | class |
+|---|---|---|
+| `SettingsPanel` | `View` (default) | `SettingsPanelView` |
+| `SettingsPanel` | `Blah` | `SettingsPanelBlah` |
+| `SettingsPanel` | `Bindings` | `SettingsPanelBindings` |
+
+The suffix is sanitized to identifier-legal characters, so generation never produces
+an invalid class name.
+
 ## Install
 
 Unity **2022.3+**, with **uGUI** and **TextMeshPro** present (both are default).

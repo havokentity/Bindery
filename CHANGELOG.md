@@ -2,6 +2,12 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.2.0] — 2026-06-17
+
+- Configurable **view class suffix** (`Preferences ▸ Bindery`), default `View`.
+  e.g. set it to `Blah` and `SettingsPanel` generates `SettingsPanelBlah`. The suffix
+  is sanitized to identifier-legal characters.
+
 ## [0.1.0] — 2026-06-17
 
 Initial release.

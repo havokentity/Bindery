@@ -43,7 +43,10 @@ namespace Bindery
 
     internal static class BinderyHierarchy
     {
-        public static ViewModel Build(GameObject root)
+        /// <summary><paramref name="classSuffix"/> is appended to the (identifier-safe) GameObject
+        /// name to form the generated class name — e.g. "View" → SettingsPanelView. See
+        /// <see cref="BinderySettings.ClassSuffix"/>.</summary>
+        public static ViewModel Build(GameObject root, string classSuffix)
         {
             var rootT = root.transform;
             var collected = new List<ViewMember>();
@@ -54,7 +57,8 @@ namespace Bindery
             foreach (var m in collected)
                 rawIds.Add(IdentifierUtil.ToIdentifier(m.node.name));
 
-            string className = IdentifierUtil.ToIdentifier(root.name).TrimStart('@') + "View";
+            string className = IdentifierUtil.ToIdentifier(root.name).TrimStart('@')
+                             + BinderySettings.Sanitize(classSuffix, BinderySettings.DefaultSuffix);
             var ids = IdentifierUtil.Dedupe(rawIds, (orig, renamed) =>
                 Debug.LogWarning($"[Bindery] {className}: duplicate accessor name '{orig}' → '{renamed}'."));
 
