@@ -161,7 +161,10 @@ Turn either group off in *Settings*. (Since the stub is written once, the scaffo
 controls present at first generation.)
 
 Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewritten,
-your `.cs` is left alone, and the live references are re-wired.
+your `.cs` is left alone, and the live references are re-wired. **Renaming the view's own
+GameObject** changes its class name too (`Canvas` → `CanvasView`); regenerating then swaps the view
+cleanly — it migrates your editable stub to the new name (carrying your `OnBind` code), removes the
+old component + `.g.cs`, and updates the registry, rather than leaving the old view behind.
 
 ### Binding is lazy — inactive views included
 

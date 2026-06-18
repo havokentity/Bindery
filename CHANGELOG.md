@@ -2,6 +2,17 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.20.0] — 2026-06-18
+
+- **Fix: renaming a view's GameObject now swaps the view cleanly instead of duplicating it.** The
+  generated class name follows the object name (`Canvas` → `CanvasView`), so renaming the object and
+  regenerating used to leave the OLD view attached beside the new one (two components, an orphaned
+  `.g.cs`). Now Bindery detects the stale view, **migrates its editable stub to the new name**
+  (renaming the class identifier inside, so your `OnBind` code carries over), deletes the old `.g.cs`,
+  removes the old component, and drops the old type from the `BinderyViews` registry before the
+  recompile — leaving a single, correctly-named view. (Scene objects; a prefab-asset rename still
+  just warns.)
+
 ## [0.19.0] — 2026-06-18
 
 - **`BinderyViews` registry is now opt-in per view.** Each row of the Bindery Views window has a

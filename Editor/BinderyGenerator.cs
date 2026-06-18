@@ -112,6 +112,10 @@ namespace Bindery
             string namespaceName = BinderySettings.GeneratedNamespace;
             string baseClass = BinderySettings.BaseClass;
 
+            // Class names of stale views removed by a rename — dropped from the registry before the
+            // recompile so BinderyViews.g.cs never references a just-deleted type.
+            var staleRemoved = new HashSet<string>(System.StringComparer.Ordinal);
+
             // The asmdef is written AFTER the view models are built (below), so we know which extra
             // assemblies any [BinderyBind] custom components need referenced. Drop the legacy copy now.
             bool wroteAsmdef = RemoveLegacyAsmdef();   // the asmdef used to live in Generated/
@@ -166,6 +170,11 @@ namespace Bindery
                         continue;
                     }
 
+                    // A rename changes the class name with the object name, which would otherwise leave
+                    // the OLD view attached beside the new one. Swap it cleanly: migrate the old stub to
+                    // the new name (keeping your OnBind code), drop the old .g.cs, remove the old component.
+                    MigrateStaleViews(go, model.className, viewsDir, staleRemoved);
+
                     WriteIfChanged(GeneratedDir + "/" + model.className + ".g.cs", BinderyCodeGen.EmitViewClass(model));
                     WriteStubIfAbsent(model, viewsDir);
 
@@ -186,7 +195,11 @@ namespace Bindery
             // With none, this emits the same JSON (plus the configured rootNamespace), so behaviour is unchanged.
             wroteAsmdef |= WriteIfChanged(AsmdefPath, BinderyCodeGen.EmitAsmdef(extraAsmRefs, namespaceName));
 
-            if (!queued && !wroteAsmdef) return;
+            // A rename removed stale view type(s) — rewrite the registry WITHOUT them before the recompile
+            // (TypeCache still lists the old type until then, so the exclude keeps it out of BinderyViews).
+            if (staleRemoved.Count > 0) RegenerateRegistry(staleRemoved);
+
+            if (!queued && !wroteAsmdef && staleRemoved.Count == 0) return;
             AssetDatabase.Refresh();
             // Wire now too: when the generated code is unchanged no compile follows the
             // Refresh, so [DidReloadScripts] never fires — but the types already exist.
@@ -608,6 +621,47 @@ namespace Bindery
             if (File.Exists(newPath) || File.Exists(legacyPath)) return;
             File.WriteAllText(newPath, BinderyCodeGen.EmitBehaviourStub(
                 model, BinderySettings.ScaffoldButtonHandlers, BinderySettings.ScaffoldControlHandlers));
+        }
+
+        // Renaming a GameObject renames its generated class (name → class is 1:1), so a plain regenerate
+        // would attach the NEW view beside the stale OLD one. Detect any view on this object whose class
+        // isn't the new name, carry its editable stub over to the new name (renaming the class identifier
+        // inside, so your OnBind code survives), delete the old .g.cs, and remove the stale component.
+        // Scene objects only — a prefab-asset rename still just warns (it's edited through prefab contents).
+        static void MigrateStaleViews(GameObject go, string newClass, string viewsDir, ICollection<string> removed)
+        {
+            if (!go.scene.IsValid()) return;
+            foreach (var sv in go.GetComponents<BinderyView>())
+            {
+                if (sv == null) continue;
+                string oldClass = sv.GetType().Name;
+                if (oldClass == newClass) continue;   // the matching view (or one already migrated)
+                removed.Add(oldClass);
+
+                string oldStub = viewsDir + "/" + oldClass + ".cs";
+                string newStub = viewsDir + "/" + newClass + ".cs";
+                if (File.Exists(oldStub) && !File.Exists(newStub))
+                {
+                    // Carry the stub to the new name, renaming the class identifier (whole-word) so the
+                    // partial still matches and any references to the old type name follow the rename.
+                    string code = System.Text.RegularExpressions.Regex.Replace(
+                        File.ReadAllText(oldStub),
+                        "\\b" + System.Text.RegularExpressions.Regex.Escape(oldClass) + "\\b", newClass);
+                    File.WriteAllText(newStub, code);
+                    DeleteAssetIfExists(oldStub);
+                }
+                else
+                {
+                    DeleteAssetIfExists(oldStub);   // can't migrate (target stub exists) → drop the old one
+                }
+                DeleteAssetIfExists(GeneratedDir + "/" + oldClass + ".cs");   // legacy stub location
+                DeleteAssetIfExists(GeneratedDir + "/" + oldClass + ".g.cs");
+
+                UnityEngine.Object.DestroyImmediate(sv);
+                if (!Application.isPlaying) EditorSceneManager.MarkSceneDirty(go.scene);
+                Debug.Log($"[Bindery] '{go.name}' renamed — swapped stale view {oldClass} → {newClass} " +
+                          "(migrated its stub, removed the old component + .g.cs).", go);
+            }
         }
 
         // Assembly names already on the generated asmdef (or auto-referenced by Unity), so a member
