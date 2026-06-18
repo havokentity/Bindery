@@ -2,6 +2,26 @@
 
 All notable changes to Bindery are documented here.
 
+## [1.0.0] — 2026-06-18
+
+First stable release — verified to compile and generate on **Unity 2022.3 LTS** and **Unity 6**.
+
+- **Undo support.** Generating a view is now undoable: a single Ctrl+Z removes the freshly attached
+  component (the object and its children are untouched; the generated `.cs` files remain as harmless
+  orphans). An in-place re-wire (smart Regenerate) is undoable too. *Remove* stays non-undoable — it
+  deletes the generated `.cs` files, which Unity's Undo can't restore (it confirms first).
+- **Prefab-asset rename swap.** Renaming a generated prefab view (rename the `.prefab` file) now
+  swaps it cleanly — the stale view is detached from the prefab's contents, its editable stub
+  migrated to the new name, the old `.g.cs` deleted, and the registry updated — matching the
+  scene-object behavior. (A prefab's class follows the file name, so renaming the root *inside* the
+  prefab doesn't change it.)
+- **Expanded EditMode test suite (63 tests).** Now covers collections, sub-view composition,
+  reserved-name handling, and the generated-code shape — short type names, lazy-binding accessors,
+  the collection accessor, custom types staying fully qualified, and the `BinderyViews` registry.
+- **CI stays license-free.** The validation workflow now also checks asmdef JSON validity, sample
+  paths, and CHANGELOG/version consistency. It deliberately does not compile or run the Unity tests
+  (run those locally via the Test Runner), so it needs no Unity license.
+
 ## [0.20.0] — 2026-06-18
 
 - **Fix: renaming a view's GameObject now swaps the view cleanly instead of duplicating it.** The

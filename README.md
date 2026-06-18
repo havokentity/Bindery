@@ -176,7 +176,8 @@ Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewrit
 your `.cs` is left alone, and the live references are re-wired. **Renaming the view's own
 GameObject** changes its class name too (`Canvas` → `CanvasView`); regenerating then swaps the view
 cleanly — it migrates your editable stub to the new name (carrying your `OnBind` code), removes the
-old component + `.g.cs`, and updates the registry, rather than leaving the old view behind.
+old component + `.g.cs`, and updates the registry, rather than leaving the old view behind. The same
+applies to a prefab asset when you rename the `.prefab` file.
 
 ### Binding is lazy — inactive views included
 
@@ -450,8 +451,14 @@ hierarchy into the active scene — one menu click from a live generated view.
 - A container that is itself an `Image` (e.g. a card panel) is bound as a
   `RectTransform` scope; its own `Image` is not surfaced separately.
 - `ScrollRect` is a leaf — bind its `Content` object directly if you need its items.
-- The **clean rename-swap** (rename the view's GameObject → old view removed, stub migrated) is for
-  **scene objects**; renaming a view inside a **prefab asset** still just warns about the stale view.
+- **Renaming swaps the view cleanly** — for a scene object (rename the GameObject) or a prefab asset
+  (rename the `.prefab` file): the stale view is removed, its editable stub migrated to the new name
+  (your `OnBind` code carried over), and the registry updated. (A prefab's class follows the *file*
+  name, so renaming the root *inside* a prefab doesn't change it.)
+- **Generate is undoable** — one Ctrl+Z removes a freshly generated view component (the object and
+  its children stay; the generated `.cs` files remain as harmless orphans). **Remove** is *not*
+  undoable — it deletes the generated `.cs` files, which Unity's Undo can't bring back, so it
+  confirms first.
 - A `[BinderyBind]` component's assembly must not reference `Bindery.Generated` back — keep such
   components in their own leaf assembly (Unity rejects a cyclic asmdef otherwise).
 

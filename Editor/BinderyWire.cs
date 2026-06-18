@@ -135,11 +135,18 @@ namespace Bindery
                 if (ResolveType(m.type) == null) return false;
 
             var comp = rootGo.GetComponent(type);
-            if (comp == null)
+            bool added = comp == null;
+            if (added)
             {
                 comp = rootGo.AddComponent(type);
                 if (comp == null) return false;
                 WarnStaleViews(rootGo, type);
+            }
+            else
+            {
+                // Re-wiring an existing view (a regenerate that reuses the component) — record it so the
+                // re-wire can be undone.
+                Undo.RegisterCompleteObjectUndo(comp, "Bindery regenerate " + type.Name);
             }
 
             var so = new SerializedObject(comp);
@@ -174,6 +181,11 @@ namespace Bindery
             // wired references are saved. SetDirty alone doesn't flag a scene for saving.
             if (!Application.isPlaying && rootGo.scene.IsValid())
                 EditorSceneManager.MarkSceneDirty(rootGo.scene);
+
+            // A freshly attached view is registered for undo on the successful path only — so a mistaken
+            // Generate is one Ctrl+Z away (the component is removed; the generated .cs files stay as
+            // harmless orphaned code). Registered last so a transient early-return leaves no stray record.
+            if (added) Undo.RegisterCreatedObjectUndo(comp, "Bindery generate " + type.Name);
             return true;
         }
 

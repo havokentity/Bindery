@@ -4,16 +4,19 @@ on:
   push:
   pull_request:
 
+# ---------------------------------------------------------------------------
+# Lightweight package validation — runs with NO Unity license (Bindery is a
+# pure Editor package; compiling it needs the Unity compiler, which needs a
+# licensed editor, so CI deliberately does NOT compile/run the EditMode tests.
+# Run those locally via Window ▸ General ▸ Test Runner). What CI checks:
+#   1. package.json is valid JSON with the required UPM fields, and its
+#      version is recorded in CHANGELOG.md.
+#   2. Every .asmdef is valid JSON.
+#   3. Every declared sample path exists.
+#   4. Every tracked source file has a sibling .meta.
+#   5. Every .meta guid is unique across the repo.
+# ---------------------------------------------------------------------------
 jobs:
-  # ---------------------------------------------------------------------------
-  # Lightweight validation — runs with no Unity license.
-  # Checks:
-  #   1. package.json is valid JSON and has the required UPM fields.
-  #   2. Every .cs / .asmdef / package.json under Runtime/ and Editor/ has a
-  #      sibling .meta file (missing metas break asset-database imports).
-  #   3. Every .meta guid is unique across the repo (duplicate guids cause
-  #      silent asset conflicts at import time).
-  # ---------------------------------------------------------------------------
   validate-package:
     name: Validate package structure
     runs-on: ubuntu-latest
@@ -21,77 +24,100 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # 1. Validate package.json
-      # -----------------------------------------------------------------------
-      - name: Validate package.json (JSON syntax + required fields)
+      - name: package.json + CHANGELOG + samples
         run: |
           python3 - <<'EOF'
           import json, sys
+          from pathlib import Path
 
-          with open("package.json") as f:
-              try:
-                  pkg = json.load(f)
-              except json.JSONDecodeError as e:
-                  print(f"ERROR: package.json is not valid JSON: {e}", file=sys.stderr)
-                  sys.exit(1)
+          fail = []
 
-          required = ["name", "version", "unity"]
-          missing = [k for k in required if k not in pkg]
-          if missing:
-              print(f"ERROR: package.json is missing required field(s): {', '.join(missing)}", file=sys.stderr)
+          try:
+              pkg = json.loads(Path("package.json").read_text())
+          except Exception as e:
+              print(f"ERROR: package.json is not valid JSON: {e}", file=sys.stderr)
               sys.exit(1)
 
-          print(f"OK: package.json  name={pkg['name']}  version={pkg['version']}  unity={pkg['unity']}")
+          for k in ("name", "version", "unity"):
+              if k not in pkg:
+                  fail.append(f"package.json missing required field: {k}")
+
+          version = pkg.get("version", "")
+
+          # The current version should be documented in the changelog.
+          changelog = Path("CHANGELOG.md")
+          if changelog.exists():
+              if version and f"[{version}]" not in changelog.read_text():
+                  fail.append(f"CHANGELOG.md has no entry for version [{version}]")
+          else:
+              fail.append("CHANGELOG.md is missing")
+
+          # Every declared sample path must exist.
+          for s in pkg.get("samples", []):
+              p = s.get("path", "")
+              if p and not Path(p).is_dir():
+                  fail.append(f"sample path does not exist: {p}")
+
+          if fail:
+              for f in fail:
+                  print("ERROR:", f, file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: package.json name={pkg['name']} version={version} unity={pkg['unity']}; "
+                f"CHANGELOG + {len(pkg.get('samples', []))} sample path(s) verified.")
           EOF
 
-      # -----------------------------------------------------------------------
-      # 2. Every tracked source file must have a sibling .meta
-      # -----------------------------------------------------------------------
-      - name: Check for missing .meta files
+      - name: Every .asmdef is valid JSON
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          bad = []
+          n = 0
+          for f in sorted(Path(".").rglob("*.asmdef")):
+              if "Samples~" in f.parts:
+                  continue
+              n += 1
+              try:
+                  json.loads(f.read_text())
+              except Exception as e:
+                  bad.append(f"{f}: {e}")
+          if bad:
+              for b in bad:
+                  print("ERROR: invalid asmdef:", b, file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {n} .asmdef file(s) are valid JSON.")
+          EOF
+
+      - name: Every source file has a sibling .meta
         run: |
           missing=0
-
-          # Check .cs, .asmdef, and package.json under Runtime/ and Editor/.
           while IFS= read -r -d '' file; do
-            # Skip files that are themselves .meta files
             [[ "$file" == *.meta ]] && continue
-
-            meta="${file}.meta"
-            if [[ ! -f "$meta" ]]; then
-              echo "MISSING .meta: $meta"
+            if [[ ! -f "${file}.meta" ]]; then
+              echo "MISSING .meta: ${file}.meta"
               missing=$((missing + 1))
             fi
           done < <(find Runtime Editor -type f \( -name "*.cs" -o -name "*.asmdef" -o -name "package.json" \) -print0)
-
           if [[ $missing -gt 0 ]]; then
             echo "ERROR: $missing file(s) are missing a .meta sibling." >&2
             exit 1
           fi
-
           echo "OK: all source files have .meta files."
 
-      # -----------------------------------------------------------------------
-      # 3. Every .meta guid must be unique (Samples~ excluded — Unity generates
-      #    those on import and they won't exist in the repo anyway).
-      # -----------------------------------------------------------------------
-      - name: Check for duplicate .meta guids
+      - name: Every .meta guid is unique
         run: |
           python3 - <<'EOF'
           import re, sys
           from pathlib import Path
 
           guid_re = re.compile(r'^guid:\s*([0-9a-f]{32})', re.MULTILINE)
-
-          seen = {}   # guid -> first file path
-          dupes = []
+          seen, dupes = {}, []
 
           for meta in sorted(Path(".").rglob("*.meta")):
-              # Skip anything under Samples~ (not tracked, but guard anyway)
               if "Samples~" in meta.parts:
                   continue
-              text = meta.read_text(errors="replace")
-              m = guid_re.search(text)
+              m = guid_re.search(meta.read_text(errors="replace"))
               if not m:
                   continue
               guid = m.group(1)
@@ -108,46 +134,3 @@ jobs:
 
           print(f"OK: {len(seen)} unique guid(s) — no duplicates.")
           EOF
-
-# ---------------------------------------------------------------------------
-# Full compile + test via GameCI (DISABLED — requires a UNITY_LICENSE secret).
-#
-# To enable:
-#   1. Obtain a Unity license file and add it as a repo secret named
-#      UNITY_LICENSE (see https://game.ci/docs/github/activation).
-#   2. Uncomment the job below, remove the `if: false` guard, and push.
-#
-# This job clones the package into a temporary Unity project and runs the
-# Editor test suite (EditMode + PlayMode) so that every generated .cs file
-# is actually compiled by the real Unity compiler.
-# ---------------------------------------------------------------------------
-#  unity-test:
-#    name: Compile & test (Unity ${{ matrix.unity-version }})
-#    runs-on: ubuntu-latest
-#    if: false   # <- remove this line after adding UNITY_LICENSE secret
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        unity-version:
-#          - 2022.3.56f1
-#          - 6000.0.47f1
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: Run Unity tests
-#        uses: game-ci/unity-test-runner@v4
-#        env:
-#          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-#        with:
-#          unityVersion: ${{ matrix.unity-version }}
-#          # Point GameCI at the repo root — it acts as a package under test.
-#          projectPath: .
-#          testMode: editmode
-#          # Uncomment for PlayMode tests once a test scene exists:
-#          # testMode: all
-#
-#      - uses: actions/upload-artifact@v4
-#        if: always()
-#        with:
-#          name: unity-test-results-${{ matrix.unity-version }}
-#          path: artifacts/

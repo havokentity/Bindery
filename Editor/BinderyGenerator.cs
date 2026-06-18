@@ -248,6 +248,9 @@ namespace Bindery
             var comp = go.GetComponent(type);
             if (comp == null) return false;
 
+            // Record the component so the in-place re-wire can be undone in one step.
+            Undo.RegisterCompleteObjectUndo(comp, "Bindery rewire " + model.className);
+
             var so = new SerializedObject(comp);
 
             // Every backing field the model expects must exist on the compiled type (guards against a
@@ -626,11 +629,13 @@ namespace Bindery
         // Renaming a GameObject renames its generated class (name → class is 1:1), so a plain regenerate
         // would attach the NEW view beside the stale OLD one. Detect any view on this object whose class
         // isn't the new name, carry its editable stub over to the new name (renaming the class identifier
-        // inside, so your OnBind code survives), delete the old .g.cs, and remove the stale component.
-        // Scene objects only — a prefab-asset rename still just warns (it's edited through prefab contents).
+        // inside, so your OnBind code survives), delete the old .g.cs, and remove the stale component —
+        // from the open scene, or from the prefab's contents when generating on a prefab ASSET.
         static void MigrateStaleViews(GameObject go, string newClass, string viewsDir, ICollection<string> removed)
         {
-            if (!go.scene.IsValid()) return;
+            bool isPrefab = !go.scene.IsValid() && PrefabUtility.IsPartOfPrefabAsset(go);
+            if (!go.scene.IsValid() && !isPrefab) return;
+
             foreach (var sv in go.GetComponents<BinderyView>())
             {
                 if (sv == null) continue;
@@ -638,12 +643,25 @@ namespace Bindery
                 if (oldClass == newClass) continue;   // the matching view (or one already migrated)
                 removed.Add(oldClass);
 
+                // 1) Detach the stale component FIRST, while its type is still compiled — otherwise
+                //    deleting its .g.cs below could unload the type and leave a missing script that
+                //    RemoveViewFromPrefab (which matches by type name) can no longer find.
+                if (isPrefab)
+                    RemoveViewFromPrefab(AssetDatabase.GetAssetPath(go), oldClass);   // detach via prefab contents
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(sv);
+                    if (!Application.isPlaying) EditorSceneManager.MarkSceneDirty(go.scene);
+                }
+
+                // 2) Migrate the editable stub to the new name (carry the user's OnBind code), then drop
+                //    the old .g.cs.
                 string oldStub = viewsDir + "/" + oldClass + ".cs";
                 string newStub = viewsDir + "/" + newClass + ".cs";
                 if (File.Exists(oldStub) && !File.Exists(newStub))
                 {
-                    // Carry the stub to the new name, renaming the class identifier (whole-word) so the
-                    // partial still matches and any references to the old type name follow the rename.
+                    // Rename the class identifier (whole-word) so the partial still matches and any
+                    // references to the old type name follow the rename.
                     string code = System.Text.RegularExpressions.Regex.Replace(
                         File.ReadAllText(oldStub),
                         "\\b" + System.Text.RegularExpressions.Regex.Escape(oldClass) + "\\b", newClass);
@@ -657,8 +675,6 @@ namespace Bindery
                 DeleteAssetIfExists(GeneratedDir + "/" + oldClass + ".cs");   // legacy stub location
                 DeleteAssetIfExists(GeneratedDir + "/" + oldClass + ".g.cs");
 
-                UnityEngine.Object.DestroyImmediate(sv);
-                if (!Application.isPlaying) EditorSceneManager.MarkSceneDirty(go.scene);
                 Debug.Log($"[Bindery] '{go.name}' renamed — swapped stale view {oldClass} → {newClass} " +
                           "(migrated its stub, removed the old component + .g.cs).", go);
             }

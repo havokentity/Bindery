@@ -405,5 +405,92 @@ namespace Bindery.Tests
             Assert.That(vm.members, Has.Count.EqualTo(1));
             Assert.That(vm.members[0].identifier, Is.EqualTo("name_2"));
         }
+
+        [Test]
+        public void Build_ChildNamedIsVisible_GetsRenamed()
+        {
+            // "IsVisible" is a BinderyView member → reserved, so the child is renamed.
+            var root = MakeRoot("Panel");
+            var child = MakeChild(root, "IsVisible");
+            child.AddComponent<Button>();
+
+            var vm = BinderyHierarchy.Build(root, "View", "~");
+
+            Assert.That(vm.members, Has.Count.EqualTo(1));
+            Assert.That(vm.members[0].identifier, Is.EqualTo("IsVisible_2"));
+        }
+
+        // -----------------------------------------------------------------------
+        // Build — repeated indexed siblings collapse into a collection
+        // -----------------------------------------------------------------------
+
+        [Test]
+        public void Build_RepeatedIndexedSiblings_FormACollection()
+        {
+            var root = MakeRoot("Bar");
+            foreach (var n in new[] { "Slot0", "Slot1", "Slot2" })
+                MakeChild(root, n).AddComponent<Button>();
+
+            var vm = BinderyHierarchy.Build(root, "View", "~");
+
+            Assert.That(vm.members, Has.Count.EqualTo(3));
+            Assert.That(vm.members.All(m => m.IsCollected), Is.True);
+            Assert.That(vm.members.Select(m => m.collectionName).Distinct().Single(), Is.EqualTo("Slots"));
+            Assert.That(vm.members.Count(m => m.collectionLead), Is.EqualTo(1));
+            // Lead is the lowest index, and indices are parsed.
+            var lead = vm.members.Single(m => m.collectionLead);
+            Assert.That(lead.collectionIndex, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Build_LoneIndexedSibling_StaysASingleMember()
+        {
+            var root = MakeRoot("Bar");
+            MakeChild(root, "Slot0").AddComponent<Button>();
+
+            var vm = BinderyHierarchy.Build(root, "View", "~");
+
+            Assert.That(vm.members, Has.Count.EqualTo(1));
+            Assert.That(vm.members[0].IsCollected, Is.False);
+        }
+
+        [Test]
+        public void Build_MixedTypeIndexedSiblings_NotGrouped()
+        {
+            // Slot0 (Button) + Slot1 (Toggle) share a stem but differ in type → not a collection.
+            var root = MakeRoot("Bar");
+            MakeChild(root, "Slot0").AddComponent<Button>();
+            MakeChild(root, "Slot1").AddComponent<Toggle>();
+
+            var vm = BinderyHierarchy.Build(root, "View", "~");
+
+            Assert.That(vm.members, Has.Count.EqualTo(2));
+            Assert.That(vm.members.Any(m => m.IsCollected), Is.False);
+        }
+
+        // -----------------------------------------------------------------------
+        // Build — a child that already has its own view composes as a sub-view
+        // -----------------------------------------------------------------------
+
+        [Test]
+        public void Build_ChildWithOwnView_ComposesAsSubView()
+        {
+            var root = MakeRoot("Panel");
+            var footer = MakeChild(root, "Footer");
+            footer.AddComponent<StubBinderyView>();           // Footer is its own view
+            MakeChild(footer, "Ok").AddComponent<Button>();   // ...with a child Bindery must NOT walk into
+
+            var vm = BinderyHierarchy.Build(root, "View", "~");
+
+            // Footer surfaces as a typed sub-view member (not a scope), and Ok is NOT walked.
+            Assert.That(vm.members, Has.Count.EqualTo(1));
+            var m = vm.members[0];
+            Assert.That(m.identifier, Is.EqualTo("Footer"));
+            Assert.That(m.isScope, Is.False);
+            Assert.That(m.csharpType, Is.EqualTo(typeof(StubBinderyView).FullName));
+        }
     }
+
+    // A concrete BinderyView used to exercise sub-view composition in tests.
+    internal sealed class StubBinderyView : BinderyView { }
 }
