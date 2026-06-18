@@ -46,6 +46,26 @@ namespace Bindery
         [MenuItem("Tools/Bindery/Generate Accessor Class for Selection", true)]
         static bool ValidateFromTools() => Selection.activeGameObject != null;
 
+        [MenuItem("Tools/Bindery/Regenerate All Views", false, 20)]
+        static void RegenerateAll()
+        {
+            // Every view in the loaded scene(s) — refresh after a settings change (suffix / namespace /
+            // base class) or hierarchy edits. Generate handles the batch (composition, ancestors, wiring).
+            var views = UnityEngine.Object.FindObjectsByType<BinderyView>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            var gos = new List<GameObject>();
+            var seen = new HashSet<int>();
+            foreach (var v in views)
+                if (v != null && seen.Add(v.gameObject.GetInstanceID())) gos.Add(v.gameObject);
+
+            if (gos.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Bindery", "No Bindery views found in the open scene(s).", "OK");
+                return;
+            }
+            Debug.Log($"[Bindery] Regenerating {gos.Count} view(s) in the open scene(s)…");
+            Generate(gos.ToArray());
+        }
+
         [MenuItem("GameObject/Bindery/Remove Accessor Class", false, 31)]
         static void RemoveFromHierarchy(MenuCommand command)
         {

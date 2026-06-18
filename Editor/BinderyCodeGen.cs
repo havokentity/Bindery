@@ -157,19 +157,33 @@ namespace Bindery
             foreach (var m in v.members)
             {
                 if (m.isScope) continue;
-                if (m.IsCollected) continue;   // collection elements have no individual accessor to wire — iterate the collection (e.g. Slots) yourself
+                if (m.IsCollected && !m.collectionLead) continue;          // a collection is scaffolded once, on its lead
                 var ev = ControlEvent(m.csharpType);
                 if (ev == null) continue;                                  // graphics / sub-views: no event
                 bool isButton = m.csharpType == "UnityEngine.UI.Button";
                 if (isButton ? !scaffoldButtons : !scaffoldControls) continue;
-                handlers.Add(new Handler
-                {
-                    access = AccessPath(m, scopeByNode),
-                    evt = ev.EventName,
-                    name = "On" + m.Key + ev.Suffix,
-                    param = ev.ParamDecl,
-                    todo = "handle " + m.Key + " " + ev.Action,
-                });
+                bool hasValue = !string.IsNullOrEmpty(ev.ParamDecl);
+                if (m.IsCollected)
+                    // a collection: wire every element in a loop to one indexed handler
+                    handlers.Add(new Handler
+                    {
+                        isCollection = true,
+                        hasValue = hasValue,
+                        access = CollectionAccessPath(m, scopeByNode),
+                        evt = ev.EventName,
+                        name = "On" + m.collectionName + ev.Suffix,
+                        param = hasValue ? "int index, " + ev.ParamDecl : "int index",
+                        todo = "handle " + m.collectionName + "[index] " + ev.Action,
+                    });
+                else
+                    handlers.Add(new Handler
+                    {
+                        access = AccessPath(m, scopeByNode),
+                        evt = ev.EventName,
+                        name = "On" + m.Key + ev.Suffix,
+                        param = ev.ParamDecl,
+                        todo = "handle " + m.Key + " " + ev.Action,
+                    });
             }
 
             var sb = new StringBuilder();
@@ -187,7 +201,19 @@ namespace Bindery
                 sb.AppendLine("            // TODO: bind events here, e.g. someButton.onClick.AddListener(() => { });");
             else
                 foreach (var h in handlers)
-                    sb.AppendLine("            " + h.access + "." + h.evt + ".AddListener(" + h.name + ");");
+                {
+                    if (h.isCollection)
+                    {
+                        string lambda = h.hasValue ? "value => " + h.name + "(index, value)" : "() => " + h.name + "(index)";
+                        sb.AppendLine("            for (int i = 0; i < " + h.access + ".Count; i++)");
+                        sb.AppendLine("            {");
+                        sb.AppendLine("                int index = i;");
+                        sb.AppendLine("                " + h.access + "[i]." + h.evt + ".AddListener(" + lambda + ");");
+                        sb.AppendLine("            }");
+                    }
+                    else
+                        sb.AppendLine("            " + h.access + "." + h.evt + ".AddListener(" + h.name + ");");
+                }
             sb.AppendLine("        }");
 
             foreach (var h in handlers)
@@ -204,7 +230,7 @@ namespace Bindery
             return sb.ToString();
         }
 
-        sealed class Handler { public string access, evt, name, param, todo; }
+        sealed class Handler { public string access, evt, name, param, todo; public bool isCollection, hasValue; }
         sealed class ControlEvt { public string EventName, ParamDecl, Suffix, Action; }
 
         // The basic event Bindery scaffolds per control type — null for graphics / scopes / sub-views.
@@ -235,6 +261,16 @@ namespace Bindery
             if (m.parent != null && scopeByNode.TryGetValue(m.parent, out var scope))
                 return AccessPath(scope, scopeByNode) + "." + m.identifier;
             return m.identifier; // defensive: every non-root member should resolve to a scope
+        }
+
+        // Like AccessPath, but to a collection accessor (e.g. "Slots" / "Footer.Slots") — the group
+        // surfaces under its lead's effective parent named after the collection, not the element.
+        static string CollectionAccessPath(ViewMember lead, Dictionary<Transform, ViewMember> scopeByNode)
+        {
+            if (lead.exposeOnRoot) return lead.collectionName;
+            if (lead.parent != null && scopeByNode.TryGetValue(lead.parent, out var scope))
+                return AccessPath(scope, scopeByNode) + "." + lead.collectionName;
+            return lead.collectionName;
         }
 
         // ---- Bindery.Generated.asmdef -------------------------------------------------

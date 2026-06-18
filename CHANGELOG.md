@@ -2,6 +2,16 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.8.0] — 2026-06-18
+
+- **Regenerate All Views.** `Tools ▸ Bindery ▸ Regenerate All Views` re-runs generation on every
+  view in the open scene(s) — handy after changing a setting (suffix / namespace / base class) or
+  editing hierarchies, without hunting each view down.
+- **Collection handler scaffolding.** A new view stub now scaffolds collections too: an indexed
+  loop wires every element to one handler — `for (…) Slots[i].onClick.AddListener(() => OnSlotsClicked(index));`
+  with `void OnSlotsClicked(int index)` (and `OnMutesChanged(int index, bool value)` for value
+  events). Previously collection elements were left for you to wire by hand.
+
 ## [0.7.0] — 2026-06-18
 
 - **Recursive remove.** When you Remove on an object that has Bindery views nested below it, the

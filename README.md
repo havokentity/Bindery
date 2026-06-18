@@ -144,8 +144,10 @@ public partial class SettingsPanelView
 ```
 
 Buttons get `onClick`; Toggle/Slider/Scrollbar/Dropdown/InputField/ScrollRect get
-`onValueChanged`. Turn either group off in *Settings*. (Since the stub is written once, the
-scaffolding reflects the controls present at first generation.)
+`onValueChanged`. **Collections** scaffold an indexed loop into a single handler —
+`for (…) Slots[i].onClick.AddListener(() => OnSlotsClicked(index));` with `void OnSlotsClicked(int index)`.
+Turn either group off in *Settings*. (Since the stub is written once, the scaffolding reflects the
+controls present at first generation.)
 
 Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewritten,
 your `.cs` is left alone, and the live references are re-wired.
@@ -197,7 +199,8 @@ nested views.
 A generated view's **inspector** also carries **Regenerate** and **Remove View** buttons and warns
 when a wired reference has gone missing — so the whole loop is reachable without the menus.
 **`Tools ▸ Bindery ▸ Validate Views in Scene`** scans every view (including inactive) and logs a
-clickable warning for any with missing references.
+clickable warning for any with missing references. **`Tools ▸ Bindery ▸ Regenerate All Views`**
+re-runs generation on every view in the open scene(s) — handy after changing a setting.
 
 ## Custom components
 
