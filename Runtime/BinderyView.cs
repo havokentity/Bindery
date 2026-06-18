@@ -31,6 +31,38 @@ namespace Bindery
     {
         bool _bound;
 
+        BinderyView _parentView;
+        bool _parentResolved;
+
+        /// <summary>The nearest ancestor Bindery view — the one that composes this view as a typed
+        /// sub-view. Resolved once by walking up the transform (a typed <c>GetComponentInParent</c>,
+        /// no string lookup), then cached. Null if this view stands alone.</summary>
+        public BinderyView ParentView
+        {
+            get
+            {
+                if (_parentResolved) return _parentView;
+                _parentResolved = true;
+                var p = transform.parent;
+                _parentView = p != null ? p.GetComponentInParent<BinderyView>(true) : null;
+                return _parentView;
+            }
+        }
+
+        /// <summary>The parent view as <typeparamref name="T"/>, or null if there is no parent view
+        /// (or it isn't a <typeparamref name="T"/>). Lets you climb back up typed:
+        /// <c>GetParentView&lt;SettingsPanelView&gt;()</c>.</summary>
+        public T GetParentView<T>() where T : BinderyView => ParentView as T;
+
+        /// <summary>Show or hide the whole view by toggling its GameObject's active state —
+        /// <c>view.IsVisible = false</c>. Override if you'd rather hide without deactivating
+        /// (e.g. drive a <see cref="CanvasGroup"/>).</summary>
+        public virtual bool IsVisible
+        {
+            get => gameObject.activeSelf;
+            set { if (gameObject.activeSelf != value) gameObject.SetActive(value); }
+        }
+
         protected virtual void Awake() { EnsureBound(); }
 
         /// <summary>Runs <see cref="OnBind"/> exactly once. Awake calls it; you can call it

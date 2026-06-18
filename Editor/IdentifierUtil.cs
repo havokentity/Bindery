@@ -58,11 +58,14 @@ namespace Bindery
         /// <summary>
         /// Resolve a list of identifiers within one scope (a view). The first occurrence
         /// keeps its name; later collisions get _2, _3, ... in the given (document) order.
+        /// Names in <paramref name="reserved"/> are pre-claimed, so any id matching one is renamed
+        /// too (keeps generated members from shadowing / clashing with base-class members).
         /// <paramref name="onCollision"/>(original, renamed) fires per renamed entry.
         /// </summary>
-        public static List<string> Dedupe(IList<string> ids, Action<string, string> onCollision = null)
+        public static List<string> Dedupe(IList<string> ids, IEnumerable<string> reserved = null, Action<string, string> onCollision = null)
         {
             var taken = new HashSet<string>(StringComparer.Ordinal);
+            if (reserved != null) foreach (var r in reserved) taken.Add(r);
             var result = new List<string>(ids.Count);
             foreach (var id in ids)
             {

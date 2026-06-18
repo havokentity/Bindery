@@ -2,6 +2,39 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.5.0] — 2026-06-17
+
+- **Composable views.** Generate a view on a subobject and its ancestors compose it as a
+  strongly-typed sub-view instead of re-walking its subtree: `settingsPanel.Footer` returns the
+  child `FooterView`, so `settingsPanel.Footer.OkButton` resolves through the real view. Any
+  descendant that already carries a `BinderyView` is auto-detected as a boundary and not re-walked.
+- **Auto-recompose ancestors.** Generating a sub-view walks up and regenerates the ancestor
+  views in the same pass so they pick up the new boundary with no extra step (deepest-first, so
+  the sub-view is wired before the parent that holds it).
+- **Parent navigation.** `BinderyView.ParentView` and `GetParentView<T>()` climb back up to the
+  composing view — resolved once via a typed `GetComponentInParent`, then cached (no string lookup).
+- **Editable stubs live in their own folder.** The hand-edited `<Name>View.cs` now lands in a
+  configurable **`Bindery/Views`** folder (Project Settings ▸ Bindery), apart from the regenerated
+  `.g.cs` in `Bindery/Generated`. The asmdef moved up to `Bindery/` so both still share one
+  assembly; existing stubs are left where they are.
+- **`IsVisible` on `BinderyView`.** `view.IsVisible = false` shows/hides the view by toggling its
+  GameObject active state (virtual — override to drive a `CanvasGroup` instead).
+- **Remove a view.** `GameObject ▸ Bindery ▸ Remove Accessor Class` (and the Tools menu) detaches
+  the view component and deletes its class files (`.g.cs` + editable stub) after an "are you sure"
+  confirmation. Any ancestor view that composed it is regenerated first, so nothing is left
+  referencing a deleted type.
+- **Inspector buttons.** Generated views now have a custom inspector with **Regenerate** and
+  **Remove View** buttons, plus a warning when a wired reference has gone missing (object renamed,
+  moved, or deleted) — the whole loop is reachable from the component.
+- **Reserved-name guard.** A child whose name resolves to a base-class member (`transform`,
+  `gameObject`, `name`, `enabled`, `IsVisible`, `ParentView`, `Awake`, …) or a common Unity message
+  is now renamed (`_2`) instead of silently shadowing it or breaking compilation.
+- **Scaffolded event handlers.** A freshly generated view stub now pre-wires each control's basic
+  event to a **named handler method** (with its own body and a `// TODO` placeholder) —
+  `OkButton.onClick.AddListener(OnOkButtonClicked)` plus `void OnOkButtonClicked() { // TODO… }`,
+  and `onValueChanged` for Toggle/Slider/Scrollbar/Dropdown/InputField/ScrollRect. Two checkboxes
+  in Project Settings ▸ Bindery (*button* / *other control* handlers), both on by default.
+
 ## [0.4.0] — 2026-06-17
 
 - **Transparent wrappers.** A GameObject whose name starts with the transparent prefix

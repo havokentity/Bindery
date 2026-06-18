@@ -9,14 +9,22 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace Bindery
 {
     internal static class BinderyGenerator
     {
-        const string GenRoot = "Assets/Bindery/Generated";
+        // The asmdef sits at the umbrella root so BOTH the generated .g.cs (Generated/) and the
+        // hand-edited stubs (the configurable Views/ folder) land in the one Bindery.Generated
+        // assembly — required because a view is a partial class split across those two files.
+        const string OutputRoot = "Assets/Bindery";
+        const string GeneratedDir = OutputRoot + "/Generated";
+        const string AsmdefPath = OutputRoot + "/Bindery.Generated.asmdef";
+        const string LegacyAsmdefPath = GeneratedDir + "/Bindery.Generated.asmdef";
 
         [MenuItem("GameObject/Bindery/Generate Accessor Class", false, 30)]
         static void GenerateFromHierarchy(MenuCommand command)
@@ -38,55 +46,237 @@ namespace Bindery
         [MenuItem("Tools/Bindery/Generate Accessor Class for Selection", true)]
         static bool ValidateFromTools() => Selection.activeGameObject != null;
 
+        [MenuItem("GameObject/Bindery/Remove Accessor Class", false, 31)]
+        static void RemoveFromHierarchy(MenuCommand command)
+        {
+            var sel = Selection.gameObjects;
+            if (command.context is GameObject ctx && sel.Length > 1 && ctx != sel[0]) return;
+            RemoveView(sel);
+        }
+
+        [MenuItem("GameObject/Bindery/Remove Accessor Class", true)]
+        static bool ValidateRemoveFromHierarchy() => SelectionHasView();
+
+        [MenuItem("Tools/Bindery/Remove Accessor Class for Selection", false)]
+        static void RemoveFromTools() => RemoveView(Selection.gameObjects);
+
+        [MenuItem("Tools/Bindery/Remove Accessor Class for Selection", true)]
+        static bool ValidateRemoveFromTools() => SelectionHasView();
+
+        static bool SelectionHasView()
+        {
+            foreach (var go in Selection.gameObjects)
+                if (go != null && go.GetComponent<BinderyView>() != null) return true;
+            return false;
+        }
+
         public static void Generate(GameObject[] roots)
         {
             if (roots == null || roots.Length == 0) return;
 
-            Directory.CreateDirectory(GenRoot);
-            bool wroteAsmdef = WriteIfChanged(GenRoot + "/Bindery.Generated.asmdef", BinderyCodeGen.EmitAsmdef());
+            Directory.CreateDirectory(GeneratedDir);
+            string viewsDir = ResolveViewsDir();
+            Directory.CreateDirectory(viewsDir);
+
+            bool wroteAsmdef = WriteIfChanged(AsmdefPath, BinderyCodeGen.EmitAsmdef());
+            wroteAsmdef |= RemoveLegacyAsmdef();   // the asmdef used to live in Generated/
 
             string suffix = BinderySettings.ClassSuffix;
             string transparentPrefix = BinderySettings.TransparentPrefix;
-            bool queued = false;
+
+            // Worklist = the selection PLUS any ancestor views, so generating a view on a subobject
+            // also recomposes the parents that should now hold it as a typed sub-view.
+            var worklist = new List<GameObject>();
             var seen = new HashSet<int>();
+            var ancestors = new HashSet<int>();
             foreach (var go in roots)
             {
-                if (go == null || !seen.Add(go.GetInstanceID())) continue;
-                if (!go.scene.IsValid())
+                if (!AddRoot(go, worklist, seen)) continue;
+                foreach (var anc in AncestorViews(go))
+                    if (AddRoot(anc, worklist, seen)) ancestors.Add(anc.GetInstanceID());
+            }
+
+            bool queued = false;
+            if (worklist.Count > 0)
+            {
+                // Deepest first, so a composed sub-view is always WIRED before the parent holding it.
+                worklist.Sort((a, b) => Depth(b.transform).CompareTo(Depth(a.transform)));
+
+                // Map every view in this batch to its full type name, so an ancestor's walk can
+                // compose a sub-view whose component isn't attached yet (it attaches post-compile).
+                var batch = new Dictionary<Transform, string>();
+                foreach (var go in worklist)
+                    batch[go.transform] = BinderyCodeGen.GeneratedNamespace + "." + BinderyHierarchy.ClassName(go, suffix);
+
+                foreach (var go in worklist)
                 {
-                    Debug.LogWarning($"[Bindery] '{go.name}' is a project asset, not a scene object — open it in a scene first. Skipped.");
-                    continue;
+                    var model = BinderyHierarchy.Build(go, suffix, transparentPrefix, batch);
+                    if (model.members.Count == 0)
+                    {
+                        Debug.LogWarning($"[Bindery] '{go.name}' has no bindable children — nothing to generate.");
+                        continue;
+                    }
+
+                    WriteIfChanged(GeneratedDir + "/" + model.className + ".g.cs", BinderyCodeGen.EmitViewClass(model));
+                    WriteStubIfAbsent(model, viewsDir);
+
+                    BinderyWire.Enqueue(model);
+                    queued = true;
+                    string note = ancestors.Contains(go.GetInstanceID()) ? " (recomposed ancestor)" : "";
+                    Debug.Log($"[Bindery] Generated {model.className} ({model.members.Count} members) for '{go.name}'{note}.", go);
                 }
-
-                // A control (Button/Toggle/Slider/…) is a leaf: pointing Bindery at one would
-                // otherwise surface its internal label/handle as members. Refuse it instead.
-                if (BinderyTypeMap.Classify(go, out _) == BindKind.Control)
-                {
-                    Debug.LogWarning($"[Bindery] '{go.name}' is itself a uGUI control — a control is a leaf with nothing to bind inside it. Select a container or panel instead. Skipped.");
-                    continue;
-                }
-
-                var model = BinderyHierarchy.Build(go, suffix, transparentPrefix);
-                if (model.members.Count == 0)
-                {
-                    Debug.LogWarning($"[Bindery] '{go.name}' has no bindable built-in uGUI children — nothing to generate.");
-                    continue;
-                }
-
-                string genPath = GenRoot + "/" + model.className + ".g.cs";
-                WriteIfChanged(genPath, BinderyCodeGen.EmitViewClass(model));
-                WriteIfAbsent(GenRoot + "/" + model.className + ".cs", BinderyCodeGen.EmitBehaviourStub(model));
-
-                BinderyWire.Enqueue(model);
-                queued = true;
-                Debug.Log($"[Bindery] Generated {model.className} ({model.members.Count} members) for '{go.name}'.", go);
             }
 
             if (!queued && !wroteAsmdef) return;
             AssetDatabase.Refresh();
             // Wire now too: when the generated code is unchanged no compile follows the
-            // Refresh, so [DidReloadScripts] never fires — but the type already exists.
+            // Refresh, so [DidReloadScripts] never fires — but the types already exist.
             BinderyWire.RequestWire();
+        }
+
+        // Removes the generated view component from the selected object(s) and DELETES the class
+        // files (.g.cs + editable stub). Confirms first (skipped in batch mode). Any ancestor view
+        // that composed a removed view is regenerated so it no longer references a deleted type.
+        public static void RemoveView(GameObject[] selection)
+        {
+            if (selection == null) return;
+
+            // Targets: selected objects that actually carry a generated view (deduped).
+            var targets = new List<(GameObject go, string cls)>();
+            var seen = new HashSet<int>();
+            foreach (var go in selection)
+            {
+                if (go == null || !seen.Add(go.GetInstanceID())) continue;
+                var comp = go.GetComponent<BinderyView>();
+                if (comp != null) targets.Add((go, comp.GetType().Name));
+            }
+
+            if (targets.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Bindery", "The selection has no Bindery view to remove.", "OK");
+                return;
+            }
+
+            var msg = new StringBuilder();
+            msg.Append("Remove ").Append(targets.Count).Append(targets.Count == 1 ? " Bindery view" : " Bindery views")
+               .Append(" and DELETE the generated class file(s)?\n");
+            foreach (var t in targets) msg.Append("\n   • ").Append(t.cls).Append("   (on '").Append(t.go.name).Append("')");
+            msg.Append("\n\nThis deletes the .g.cs AND the editable view stub (including any code you ")
+               .Append("added there). The deleted files cannot be recovered.");
+
+            if (!Application.isBatchMode && !EditorUtility.DisplayDialog("Remove Bindery view?", msg.ToString(), "Remove", "Cancel"))
+                return;
+
+            // Ancestor views that compose a target must be regenerated (so they fall back to walking
+            // the now-viewless subtree). Exclude targets themselves. Collect BEFORE removing.
+            var targetIds = new HashSet<int>();
+            foreach (var t in targets) targetIds.Add(t.go.GetInstanceID());
+            var regen = new List<GameObject>();
+            var regenSeen = new HashSet<int>();
+            foreach (var t in targets)
+                foreach (var anc in AncestorViews(t.go))
+                    if (!targetIds.Contains(anc.GetInstanceID()) && regenSeen.Add(anc.GetInstanceID()))
+                        regen.Add(anc);
+
+            // 1) Detach the components (no Undo — the class files go too, so a half-undo would only
+            //    resurrect a missing-script component).
+            foreach (var t in targets)
+            {
+                var comp = t.go.GetComponent<BinderyView>();
+                if (comp != null) UnityEngine.Object.DestroyImmediate(comp);
+                if (!Application.isPlaying && t.go.scene.IsValid())
+                    EditorSceneManager.MarkSceneDirty(t.go.scene);
+                Debug.Log($"[Bindery] Removed view {t.cls} from '{t.go.name}'.", t.go);
+            }
+
+            // 2) Recompose ancestors first — now their .g.cs no longer references the removed types,
+            //    so 3) can delete those files without leaving a dangling reference.
+            if (regen.Count > 0) Generate(regen.ToArray());
+
+            // 3) Delete the removed views' class files.
+            string viewsDir = ResolveViewsDir();
+            foreach (var t in targets)
+            {
+                DeleteAssetIfExists(GeneratedDir + "/" + t.cls + ".g.cs");
+                DeleteAssetIfExists(viewsDir + "/" + t.cls + ".cs");
+                DeleteAssetIfExists(GeneratedDir + "/" + t.cls + ".cs"); // legacy stub location
+            }
+            AssetDatabase.Refresh();
+        }
+
+        static void DeleteAssetIfExists(string path)
+        {
+            if (File.Exists(path)) AssetDatabase.DeleteAsset(path);
+        }
+
+        // Adds a generation root to the worklist (deduped), applying the scene + control-root guards.
+        static bool AddRoot(GameObject go, List<GameObject> worklist, HashSet<int> seen)
+        {
+            if (go == null || !seen.Add(go.GetInstanceID())) return false;
+            if (!go.scene.IsValid())
+            {
+                Debug.LogWarning($"[Bindery] '{go.name}' is a project asset, not a scene object — open it in a scene first. Skipped.");
+                return false;
+            }
+            if (BinderyTypeMap.Classify(go, out _) == BindKind.Control)
+            {
+                Debug.LogWarning($"[Bindery] '{go.name}' is itself a uGUI control — a control is a leaf with nothing to bind inside it. Select a container or panel instead. Skipped.");
+                return false;
+            }
+            worklist.Add(go);
+            return true;
+        }
+
+        // Ancestors that already carry a generated view — those compose this node and must be
+        // regenerated so they pick it up as a typed sub-view.
+        static System.Collections.Generic.IEnumerable<GameObject> AncestorViews(GameObject go)
+        {
+            for (var t = go.transform.parent; t != null; t = t.parent)
+                if (t.GetComponent<BinderyView>() != null)
+                    yield return t.gameObject;
+        }
+
+        static int Depth(Transform t)
+        {
+            int d = 0;
+            for (var p = t.parent; p != null; p = p.parent) d++;
+            return d;
+        }
+
+        // The editable-stub folder from settings, forced under the umbrella so the asmdef covers it
+        // (a view's stub + .g.cs are one partial class → must share an assembly).
+        static string ResolveViewsDir()
+        {
+            string dir = "Assets/" + BinderySettings.ViewsFolder;
+            if (dir != OutputRoot && !dir.StartsWith(OutputRoot + "/", System.StringComparison.Ordinal))
+            {
+                Debug.LogWarning($"[Bindery] Editable views folder '{BinderySettings.ViewsFolder}' must be under " +
+                    $"'Bindery/' so it shares the generated assembly — falling back to '{BinderySettings.DefaultViewsFolder}'.");
+                dir = "Assets/" + BinderySettings.DefaultViewsFolder;
+            }
+            return dir;
+        }
+
+        // The asmdef moved from Generated/ to the umbrella root; drop the old one so the project
+        // doesn't end up with two assemblies named "Bindery.Generated".
+        static bool RemoveLegacyAsmdef()
+        {
+            if (!File.Exists(LegacyAsmdefPath)) return false;
+            File.Delete(LegacyAsmdefPath);
+            if (File.Exists(LegacyAsmdefPath + ".meta")) File.Delete(LegacyAsmdefPath + ".meta");
+            return true;
+        }
+
+        // Write the one-time editable stub into the Views folder — unless a stub for this class
+        // already exists there OR in the legacy Generated/ location (so we never duplicate the
+        // partial and clobber the user's code).
+        static void WriteStubIfAbsent(ViewModel model, string viewsDir)
+        {
+            string newPath = viewsDir + "/" + model.className + ".cs";
+            string legacyPath = GeneratedDir + "/" + model.className + ".cs";
+            if (File.Exists(newPath) || File.Exists(legacyPath)) return;
+            File.WriteAllText(newPath, BinderyCodeGen.EmitBehaviourStub(
+                model, BinderySettings.ScaffoldButtonHandlers, BinderySettings.ScaffoldControlHandlers));
         }
 
         static bool WriteIfChanged(string path, string content)
@@ -94,11 +284,6 @@ namespace Bindery
             if (File.Exists(path) && File.ReadAllText(path) == content) return false;
             File.WriteAllText(path, content);
             return true;
-        }
-
-        static void WriteIfAbsent(string path, string content)
-        {
-            if (!File.Exists(path)) File.WriteAllText(path, content);
         }
     }
 }

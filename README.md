@@ -94,32 +94,96 @@ view.Footer.OkButton.onClick.AddListener(Apply);   // nested container → neste
 - **Containers become scopes.** A child that holds no bindable component but
   *contains* bindable descendants turns into a nested `…Scope` class (typed
   `RectTransform`) you reach through — `view.Footer.OkButton`.
+- **Sub-views compose.** If a descendant already has its *own* generated view, the
+  parent surfaces it as that typed view (not a scope) and stops there —
+  `view.Footer` is a `FooterView`. See *Composing views*.
 - **`~`-prefixed nodes are transparent.** Prefix a GameObject's name with `~` and it
   generates *nothing* — its children are promoted to its level. A layout-only
   `~ButtonRow` gives you `view.OkButton`, not `view.ButtonRow.OkButton`. (On a leaf it
   just means "skip this one.") The prefix is configurable — see *Settings*.
 - **TextMeshPro is surfaced as `TMP_Text`** so the accessor works for any TMP text.
-- **Names become C# identifiers**, casing preserved; collisions inside a view get
-  `_2` / `_3` suffixes (with a console warning).
+- **Names become C# identifiers**, casing preserved; collisions — with each other *or* with a
+  base-class member (`transform`, `IsVisible`, `Awake`, …) — get `_2` / `_3` suffixes (with a
+  console warning), so generation never shadows a base member or fails to compile.
 
 ## Add your own behaviour
 
 The generator also drops an **editable** stub (`<Name>View.cs`, written only once,
-never regenerated) in the same folder so your code shares the assembly with the
-generated partial:
+never regenerated) in the **`Bindery/Views`** folder — apart from the regenerated
+`.g.cs`, but in the same assembly so it's the same partial class. By default it comes
+**pre-wired**: each control's basic event is hooked to a named handler method with its own
+body, ready for you to fill in:
 
 ```csharp
 public partial class SettingsPanelView
 {
     protected override void OnBind()   // runs once, before Awake completes
     {
-        Footer.OkButton.onClick.AddListener(Apply);
+        Footer.OkButton.onClick.AddListener(OnOkButtonClicked);
+        VolumeSlider.onValueChanged.AddListener(OnVolumeSliderChanged);
+        // IsVisible = false;          // hide the whole view; flip back with IsVisible = true
+    }
+
+    void OnOkButtonClicked()
+    {
+        // TODO: handle OkButton click
+    }
+
+    void OnVolumeSliderChanged(float value)
+    {
+        // TODO: handle VolumeSlider value change
     }
 }
 ```
 
+Buttons get `onClick`; Toggle/Slider/Scrollbar/Dropdown/InputField/ScrollRect get
+`onValueChanged`. Turn either group off in *Settings*. (Since the stub is written once, the
+scaffolding reflects the controls present at first generation.)
+
 Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewritten,
 your `.cs` is left alone, and the live references are re-wired.
+
+## Composing views
+
+Generate a view on a child that already lives inside another view, and the parent
+**composes** it instead of re-walking its subtree. Say `SettingsPanel` has a
+`SettingsPanelView` and you also generate a view on its `Footer`:
+
+```text
+SettingsPanel   (SettingsPanelView)
+└── Footer       (FooterView)   ← generate here too
+    ├── OkButton
+    └── CancelButton
+```
+
+The parent stops at that boundary and exposes the child as its typed view:
+
+```csharp
+public FooterView Footer => _Footer;                 // a FooterView, not a FooterScope
+
+settingsPanel.Footer.OkButton.onClick.AddListener(Apply);          // down, through the real view
+footer.GetParentView<SettingsPanelView>().VolumeSlider.value = 1f;  // up, back to the parent
+```
+
+- **Auto-detected** — any descendant carrying a `BinderyView` is treated as a boundary; the
+  parent never re-walks below it.
+- **Ancestors auto-recompose** — generating the child also regenerates the ancestor view(s) in
+  the same step (deepest-first, so refs wire in order), so the composition appears immediately.
+- **Up is `ParentView`** — `view.ParentView` / `view.GetParentView<T>()` resolve the composing
+  view via a cached `GetComponentInParent` — no runtime string lookup.
+- A `~`-transparent node still wins — it's ignored even if it carries a view.
+
+## Removing a view
+
+Select the object and hit **Bindery ▸ Remove Accessor Class** (Hierarchy right-click or the
+`Tools` menu) — or use the **Remove View** button on the view's inspector. After an *are-you-sure*
+confirmation, Bindery detaches the view component and deletes its class files — both the `.g.cs`
+and your editable `<Name>View.cs` stub (so back up any `OnBind` code first; the deletion can't be
+undone). If an ancestor view was composing the one you remove, it's regenerated automatically so it
+stops referencing the deleted type (the subtree falls back to a normal scope).
+
+A generated view's **inspector** also carries **Regenerate** and **Remove View** buttons and warns
+when a wired reference has gone missing — so the whole loop is reachable without the menus.
 
 ## Settings
 
@@ -152,6 +216,15 @@ It composes recursively (nested `~` wrappers collapse), the marker is never part
 identifier, and the wired references still point at the real child objects. Set the prefix
 empty to turn the feature off. Stored in the same project settings asset.
 
+**Project Settings ▸ Bindery ▸ Editable views folder** — where the hand-edited `<Name>View.cs`
+stubs go (default `Bindery/Views`), kept apart from the regenerated `.g.cs` in `Bindery/Generated`.
+It must stay under `Bindery/` so it shares the generated assembly (a view is one partial class
+across the two files); a value outside that falls back to the default.
+
+**Project Settings ▸ Bindery ▸ New view stubs** — two checkboxes (both on) that control the
+handler scaffolding in a freshly generated stub: *Scaffold button click handlers* and *Scaffold
+control event handlers*. Turn them off if you'd rather start from an empty `OnBind()`.
+
 ## Install
 
 Unity **2022.3+**, with **uGUI** and **TextMeshPro** present.
@@ -165,8 +238,9 @@ Bindery depends on `com.unity.ugui`. **TextMeshPro** comes from there automatica
 separate `com.unity.textmeshpro` package — present in new projects by default; add it via
 the Package Manager if your project doesn't already have it.
 
-Generated output lands in `Assets/Bindery/Generated/` under its own
-`Bindery.Generated` assembly definition, referenceable from your own asmdefs.
+Generated output lands under `Assets/Bindery/` — the regenerated `.g.cs` in `Generated/`,
+your editable stubs in `Views/` — both under one `Bindery.Generated` assembly definition
+(at `Assets/Bindery/`), referenceable from your own asmdefs.
 
 ## Notes & limits (v1)
 

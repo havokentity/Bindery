@@ -84,6 +84,12 @@ namespace Bindery
             var rootGo = ResolveGameObject(v.rootGid);
             if (rootGo == null) return false;
 
+            // Wire only once EVERY member type is compiled. A freshly generated sub-view type may
+            // not exist yet on an early (pre-reload) wire pass — wiring then would resolve that
+            // reference to null and dequeue the view half-wired. Retrying keeps the queue intact.
+            foreach (var m in v.members)
+                if (ResolveType(m.type) == null) return false;
+
             var comp = rootGo.GetComponent(type);
             if (comp == null)
             {
@@ -93,12 +99,15 @@ namespace Bindery
             }
 
             var so = new SerializedObject(comp);
+
+            // If the live component's compiled type doesn't expose every member yet, it's STALE — a
+            // regenerate changed its fields but the domain hasn't reloaded. Wiring the old type now
+            // would set the wrong/typed-out refs and dequeue the view; retry after the reload instead.
             foreach (var m in v.members)
-            {
-                var prop = so.FindProperty(m.field);
-                if (prop == null) continue;
-                prop.objectReferenceValue = ResolveReference(m);
-            }
+                if (so.FindProperty(m.field) == null) return false;
+
+            foreach (var m in v.members)
+                so.FindProperty(m.field).objectReferenceValue = ResolveReference(m);
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(comp);
             // Mark the object's OWN scene dirty (correct under multi-scene editing and in
@@ -128,8 +137,9 @@ namespace Bindery
             var go = ResolveGameObject(m.gid);
             if (go == null) return null;
             var ct = ResolveType(m.type);
-            if (ct == null || ct == typeof(RectTransform)) return go.GetComponent<RectTransform>();
-            return go.GetComponent(ct);
+            if (ct == null) return null;                                  // type not compiled — leave unwired
+            if (ct == typeof(RectTransform)) return go.GetComponent<RectTransform>();
+            return go.GetComponent(ct);                                    // uGUI control/graphic OR a sub-view
         }
 
         // ---- GlobalObjectId helpers ---------------------------------------------------

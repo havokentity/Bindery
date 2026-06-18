@@ -25,9 +25,13 @@ namespace Bindery
         const string AssetPath = "ProjectSettings/BinderySettings.asset";
         public const string DefaultSuffix = "View";
         public const string DefaultTransparentPrefix = "~";
+        public const string DefaultViewsFolder = "Bindery/Views";
 
         [SerializeField] string classSuffix = DefaultSuffix;
         [SerializeField] string transparentPrefix = DefaultTransparentPrefix;
+        [SerializeField] string viewsFolder = DefaultViewsFolder;
+        [SerializeField] bool scaffoldButtonHandlers = true;
+        [SerializeField] bool scaffoldControlHandlers = true;
 
         static BinderySettings _instance;
 
@@ -62,6 +66,26 @@ namespace Bindery
         /// nothing and its children are promoted to its level. Used verbatim (not sanitized); an
         /// empty value turns the feature off (no node is ever treated as transparent).</summary>
         public static string TransparentPrefix => Instance.transparentPrefix ?? "";
+
+        /// <summary>Project-relative folder (under Assets/) for the editable, hand-written view stubs
+        /// — kept apart from the regenerated <c>.g.cs</c>. Must live under the generated assembly's
+        /// root ("Bindery/"); a value outside it falls back to the default.</summary>
+        public static string ViewsFolder
+        {
+            get
+            {
+                var f = (Instance.viewsFolder ?? "").Trim().Trim('/');
+                return string.IsNullOrEmpty(f) ? DefaultViewsFolder : f;
+            }
+        }
+
+        /// <summary>When generating a new view stub, pre-wire each Button's onClick to a named handler
+        /// method (with its own body). On by default.</summary>
+        public static bool ScaffoldButtonHandlers => Instance.scaffoldButtonHandlers;
+
+        /// <summary>When generating a new view stub, pre-wire each non-button control's basic event
+        /// (Toggle/Slider/Dropdown/InputField/… onValueChanged) to a named handler. On by default.</summary>
+        public static bool ScaffoldControlHandlers => Instance.scaffoldControlHandlers;
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.
@@ -129,9 +153,51 @@ namespace Bindery
                     }
 
                     EditorGUILayout.Space();
+
+                    EditorGUI.BeginChangeCheck();
+                    string nextViews = EditorGUILayout.DelayedTextField(
+                        new GUIContent("Editable views folder",
+                            "Project-relative folder (under Assets/) for the hand-edited view stubs, " +
+                            "kept apart from the generated .g.cs. Must be under \"Bindery/\" so it shares " +
+                            "the generated assembly. Default \"Bindery/Views\"."),
+                        s.viewsFolder);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.viewsFolder = nextViews;
+                        Save();
+                    }
+
+                    if (GUILayout.Button("Reset to default (\"Bindery/Views\")", GUILayout.Width(260)))
+                    {
+                        s.viewsFolder = DefaultViewsFolder;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("New view stubs", EditorStyles.boldLabel);
+
+                    EditorGUI.BeginChangeCheck();
+                    bool nextBtn = EditorGUILayout.ToggleLeft(
+                        new GUIContent("Scaffold button click handlers",
+                            "When a view stub is first generated, pre-wire each Button's onClick to a " +
+                            "named handler method (with its own empty body) in OnBind()."),
+                        s.scaffoldButtonHandlers);
+                    bool nextCtrl = EditorGUILayout.ToggleLeft(
+                        new GUIContent("Scaffold control event handlers",
+                            "Same, for other controls' basic events — Toggle/Slider/Scrollbar/Dropdown/" +
+                            "InputField onValueChanged, ScrollRect onValueChanged."),
+                        s.scaffoldControlHandlers);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.scaffoldButtonHandlers = nextBtn;
+                        s.scaffoldControlHandlers = nextCtrl;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
                     EditorGUILayout.HelpBox(
-                        "Stored in ProjectSettings/BinderySettings.asset — commit it to share the " +
-                        "suffix across the team.", MessageType.None);
+                        "Stored in ProjectSettings/BinderySettings.asset — commit it to share these " +
+                        "settings across the team.", MessageType.None);
 
                     EditorGUI.indentLevel--;
                 },

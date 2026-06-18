@@ -12,6 +12,10 @@
 // A child whose name starts with the transparent prefix (e.g. "~") is a wrapper: it
 // surfaces nothing itself and its children are promoted to its level (their effective
 // parent skips it). Layout-only containers stay out of the generated API this way.
+//
+// A child that already carries its OWN generated view (attached, or present in the
+// generation batch) is a composition boundary: it's surfaced as a member typed as that
+// view and we DON'T descend into it — the sub-view owns its subtree.
 // =============================================================================
 
 using System.Collections.Generic;
@@ -46,26 +50,49 @@ namespace Bindery
 
     internal static class BinderyHierarchy
     {
+        // Names a generated accessor must NOT take: members it would shadow or clash with on the
+        // base class (Object/Component/Behaviour/MonoBehaviour + BinderyView), the Unity message
+        // methods a user is likely to add to the stub, and the base private fields a "_<name>"
+        // backing field would collide with. A child whose name resolves to one of these is renamed.
+        static readonly HashSet<string> ReservedNames = new HashSet<string>(System.StringComparer.Ordinal)
+        {
+            // UnityEngine.Object / Component / Behaviour / MonoBehaviour
+            "name", "hideFlags", "gameObject", "transform", "tag", "enabled", "isActiveAndEnabled",
+            "useGUILayout", "runInEditMode",
+            "GetComponent", "GetComponents", "GetComponentInChildren", "GetComponentInParent",
+            "GetComponentsInChildren", "GetComponentsInParent", "TryGetComponent",
+            "CompareTag", "SendMessage", "SendMessageUpwards", "BroadcastMessage",
+            "StartCoroutine", "StopCoroutine", "StopAllCoroutines",
+            "Invoke", "InvokeRepeating", "CancelInvoke", "IsInvoking", "print",
+            // Unity message methods a developer commonly adds alongside OnBind
+            "Awake", "Start", "Update", "FixedUpdate", "LateUpdate",
+            "OnEnable", "OnDisable", "OnDestroy", "Reset", "OnValidate", "OnGUI",
+            // BinderyView's own surface
+            "OnBind", "EnsureBound", "IsVisible", "ParentView", "GetParentView",
+            // BinderyView private fields, which a "_<name>" backing field would collide with
+            "bound", "parentView", "parentResolved",
+        };
+
         /// <summary><paramref name="classSuffix"/> is appended to the (identifier-safe) GameObject
         /// name to form the generated class name — e.g. "View" → SettingsPanelView. A child whose
         /// name starts with <paramref name="transparentPrefix"/> (e.g. "~") is treated as a
         /// transparent wrapper: it surfaces nothing itself and its children are promoted to its
         /// level. See <see cref="BinderySettings.ClassSuffix"/> / <see cref="BinderySettings.TransparentPrefix"/>.</summary>
-        public static ViewModel Build(GameObject root, string classSuffix, string transparentPrefix)
+        public static ViewModel Build(GameObject root, string classSuffix, string transparentPrefix,
+                                      IDictionary<Transform, string> batchSubViews = null)
         {
             var rootT = root.transform;
             var collected = new List<ViewMember>();
-            Collect(rootT, rootT, rootT, transparentPrefix, collected);
+            Collect(rootT, rootT, rootT, transparentPrefix, batchSubViews, collected);
 
             // Global dedupe across the whole view → unique backing-field names.
             var rawIds = new List<string>(collected.Count);
             foreach (var m in collected)
                 rawIds.Add(IdentifierUtil.ToIdentifier(m.node.name));
 
-            string className = IdentifierUtil.ToIdentifier(root.name).TrimStart('@')
-                             + BinderySettings.Sanitize(classSuffix, BinderySettings.DefaultSuffix);
-            var ids = IdentifierUtil.Dedupe(rawIds, (orig, renamed) =>
-                Debug.LogWarning($"[Bindery] {className}: duplicate accessor name '{orig}' → '{renamed}'."));
+            string className = ClassName(root, classSuffix);
+            var ids = IdentifierUtil.Dedupe(rawIds, ReservedNames, (orig, renamed) =>
+                Debug.LogWarning($"[Bindery] {className}: accessor name '{orig}' is reserved or already used → renamed '{renamed}'."));
 
             for (int i = 0; i < collected.Count; i++)
             {
@@ -78,10 +105,17 @@ namespace Bindery
             return new ViewModel { className = className, root = rootT, members = collected };
         }
 
+        /// <summary>The generated class name for a root: identifier-safe GameObject name + suffix.
+        /// Shared with the generator so its batch map of view types matches what Build emits.</summary>
+        public static string ClassName(GameObject root, string classSuffix)
+            => IdentifierUtil.ToIdentifier(root.name).TrimStart('@')
+             + BinderySettings.Sanitize(classSuffix, BinderySettings.DefaultSuffix);
+
         // <paramref name="effParent"/> is the level a collected member attaches to: the root, or
         // the nearest enclosing real scope. It diverges from node.parent only across a transparent
         // wrapper, whose children are promoted to ITS level (so their effParent skips it).
-        static void Collect(Transform node, Transform effParent, Transform root, string prefix, List<ViewMember> outList)
+        static void Collect(Transform node, Transform effParent, Transform root, string prefix,
+                            IDictionary<Transform, string> batch, List<ViewMember> outList)
         {
             foreach (Transform child in node)
             {
@@ -93,7 +127,16 @@ namespace Bindery
                     // level. A transparent control is excluded outright — we don't descend, so its
                     // internal label/handle can never leak.
                     if (BinderyTypeMap.Classify(go, out _) != BindKind.Control)
-                        Collect(child, effParent, root, prefix, outList);
+                        Collect(child, effParent, root, prefix, batch, outList);
+                    continue;
+                }
+
+                // Already its own Bindery view (attached now, or being generated in this batch)?
+                // Compose it as a typed boundary and STOP — that view owns its own subtree.
+                var subType = SubViewTypeOf(child, batch);
+                if (subType != null)
+                {
+                    outList.Add(Leaf(child, effParent, root, subType));
                     continue;
                 }
 
@@ -105,7 +148,7 @@ namespace Bindery
                     continue; // control = leaf; never surface its internals
                 }
 
-                bool hasBindableDesc = HasBindableDescendant(child, prefix);
+                bool hasBindableDesc = HasBindableDescendant(child, prefix, batch);
                 if (!hasBindableDesc)
                 {
                     if (kind == BindKind.Graphic) outList.Add(Leaf(child, effParent, root, type));
@@ -114,33 +157,45 @@ namespace Bindery
 
                 // Container with bindable descendants → a scope (typed RectTransform), recurse.
                 outList.Add(Scope(child, effParent, root));
-                Collect(child, child, root, prefix, outList);
+                Collect(child, child, root, prefix, batch, outList);
             }
         }
 
-        // Does this subtree contain anything bindable? A control counts (and is not descended
-        // into). A transparent wrapper never counts itself, but its children still do (they get
-        // promoted up) — unless it's a transparent control, which is excluded entirely.
-        static bool HasBindableDescendant(Transform node, string prefix)
+        // Does this subtree contain anything bindable? A control or a composed sub-view counts
+        // (and neither is descended into). A transparent wrapper never counts itself, but its
+        // children still do (they get promoted up) — unless it's a transparent control (excluded).
+        static bool HasBindableDescendant(Transform node, string prefix, IDictionary<Transform, string> batch)
         {
             foreach (Transform child in node)
             {
-                var kind = BinderyTypeMap.Classify(child.gameObject, out _);
-
                 if (IsTransparent(child, prefix))
                 {
-                    if (kind != BindKind.Control && HasBindableDescendant(child, prefix)) return true;
+                    if (BinderyTypeMap.Classify(child.gameObject, out _) != BindKind.Control
+                        && HasBindableDescendant(child, prefix, batch)) return true;
                     continue;
                 }
 
+                if (SubViewTypeOf(child, batch) != null) return true; // a composed sub-view counts
+
+                var kind = BinderyTypeMap.Classify(child.gameObject, out _);
                 if (kind == BindKind.Control || kind == BindKind.Graphic) return true;
-                if (HasBindableDescendant(child, prefix)) return true;
+                if (HasBindableDescendant(child, prefix, batch)) return true;
             }
             return false;
         }
 
         static bool IsTransparent(Transform t, string prefix)
             => !string.IsNullOrEmpty(prefix) && t.name.StartsWith(prefix, System.StringComparison.Ordinal);
+
+        // The fully-qualified type name of the Bindery view that owns this node — from the current
+        // generation batch (component not attached until post-compile) or an already-attached view.
+        // Null when the node has no view, so the walker treats it normally.
+        static string SubViewTypeOf(Transform child, IDictionary<Transform, string> batch)
+        {
+            if (batch != null && batch.TryGetValue(child, out var t)) return t;
+            var v = child.GetComponent<BinderyView>();
+            return v != null ? v.GetType().FullName : null;
+        }
 
         static ViewMember Leaf(Transform node, Transform effParent, Transform root, string type) => new ViewMember
         {
