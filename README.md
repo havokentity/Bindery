@@ -108,7 +108,8 @@ view.Footer.OkButton.onClick.AddListener(Apply);   // nested container → neste
 - **Your own components bind too.** Mark a MonoBehaviour with `[Bindery.BinderyBind]` and it's
   surfaced as a typed leaf — `CanvasGroup` is recognized out of the box. See *Custom components*.
 - **Repeated siblings collapse into a collection.** `Slot0, Slot1, Slot2` (same type, shared stem +
-  index) become one ordered `view.Slots` (`IReadOnlyList<Button>`) instead of three accessors.
+  index) become one ordered `view.Slots` (`IReadOnlyList<Button>`) instead of three accessors,
+  serialized as a single array (a list in the Inspector). See *Collections* in *Settings*.
 - **Names become C# identifiers**, casing preserved; collisions — with each other *or* with a
   base-class member (`transform`, `IsVisible`, `Awake`, …) — get `_2` / `_3` suffixes (with a
   console warning), so generation never shadows a base member or fails to compile.
@@ -263,6 +264,10 @@ control event handlers*. Turn them off if you'd rather start from an empty `OnBi
 `Bindery.Generated`) and the **view base class** (default `Bindery.BinderyView`) that views derive
 from. Both are sanitized to legal dotted C# names and applied across the `.g.cs`, the stub, the
 asmdef `rootNamespace`, and wiring. The base class must still derive from `Bindery.BinderyView`.
+
+**Project Settings ▸ Bindery ▸ Collections** — *Serialize collections as a single array* (on by
+default). A collection serializes as one `T[]` field, shown as a **list in the Inspector**, instead
+of an individual `[SerializeField]` per element. Turn it off to get the per-element fields back.
 
 ## Install
 

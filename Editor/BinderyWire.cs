@@ -26,7 +26,11 @@ namespace Bindery
     {
         const string SessionKey = "Bindery.PendingWire";
 
-        [Serializable] class PMember { public string field; public string gid; public string type; }
+        // A single reference (gid + type), OR — when isArray — an ARRAY field populated with each
+        // element in order (a serialized collection like Slot0..Slot2 → one T[] field). NOTE: the
+        // flag is needed because JsonUtility turns a null string[] into an empty [] on round-trip,
+        // so "gids != null" can't tell a single member from an array member.
+        [Serializable] class PMember { public string field; public string gid; public string type; public string[] gids; public bool isArray; }
         [Serializable] class PView { public string rootGid; public string typeName; public List<PMember> members = new List<PMember>(); }
         [Serializable] class PSet { public List<PView> views = new List<PView>(); }
 
@@ -49,11 +53,32 @@ namespace Bindery
                 typeName = ns + "." + m.className,
             };
             foreach (var mem in m.members)
-                pv.members.Add(new PMember { field = mem.FieldName, gid = GidOf(mem.node.gameObject), type = mem.csharpType });
+            {
+                if (m.collectionsAsArray && mem.IsCollected)
+                {
+                    if (!mem.collectionLead) continue;   // one array PMember per collection, on the lead
+                    pv.members.Add(new PMember { field = "_" + mem.collectionName, type = mem.csharpType, gids = CollectionGids(m, mem), isArray = true });
+                }
+                else
+                    pv.members.Add(new PMember { field = mem.FieldName, gid = GidOf(mem.node.gameObject), type = mem.csharpType });
+            }
 
             set.views.RemoveAll(v => v.rootGid == pv.rootGid && v.typeName == pv.typeName);
             set.views.Add(pv);
             Save(set);
+        }
+
+        // The GlobalObjectIds of a collection's elements (the lead's group), in element-index order.
+        static string[] CollectionGids(ViewModel m, ViewMember lead)
+        {
+            var group = new List<ViewMember>();
+            foreach (var e in m.members)
+                if (e.collectionName == lead.collectionName && e.parent == lead.parent && e.csharpType == lead.csharpType)
+                    group.Add(e);
+            group.Sort((a, b) => a.collectionIndex.CompareTo(b.collectionIndex));
+            var gids = new string[group.Count];
+            for (int i = 0; i < group.Count; i++) gids[i] = GidOf(group[i].node.gameObject);
+            return gids;
         }
 
         /// <summary>Process the queue on the next tick (coalesced). Called after a Refresh and
@@ -75,7 +100,16 @@ namespace Bindery
             {
                 var type = ResolveType(v.typeName);
                 if (type == null) { remaining.Add(v); continue; }     // not compiled yet — retry next reload
-                if (!Wire(v, type)) { remaining.Add(v); continue; }   // target not resolvable yet
+                bool wired;
+                try { wired = Wire(v, type); }
+                catch (Exception e)
+                {
+                    // A transient failure (e.g. a stale serialized layout mid-recompile) must not abort
+                    // the whole pass and lose the queue — keep the view and retry after the next reload.
+                    Debug.LogWarning($"[Bindery] wiring '{v.typeName}' failed — retrying after the next reload. ({e.Message})");
+                    wired = false;
+                }
+                if (!wired) { remaining.Add(v); continue; }           // not ready yet — retry next reload
             }
 
             set.views = remaining;
@@ -109,8 +143,23 @@ namespace Bindery
             foreach (var m in v.members)
                 if (so.FindProperty(m.field) == null) return false;
 
+            // Size every array field first and COMMIT — a structural array resize can otherwise drop
+            // value writes made to other properties on the same SerializedObject before Apply.
+            bool resized = false;
             foreach (var m in v.members)
-                so.FindProperty(m.field).objectReferenceValue = ResolveReference(m);
+                if (m.isArray) { so.FindProperty(m.field).arraySize = m.gids.Length; resized = true; }
+            if (resized) { so.ApplyModifiedPropertiesWithoutUndo(); so.Update(); }
+
+            // Now assign values: array elements (in order) + single references.
+            foreach (var m in v.members)
+            {
+                var prop = so.FindProperty(m.field);
+                if (m.isArray)
+                    for (int i = 0; i < m.gids.Length; i++)
+                        prop.GetArrayElementAtIndex(i).objectReferenceValue = ResolveReference(m.gids[i], m.type);
+                else
+                    prop.objectReferenceValue = ResolveReference(m.gid, m.type);
+            }
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(comp);
             // Mark the object's OWN scene dirty (correct under multi-scene editing and in
@@ -135,11 +184,11 @@ namespace Bindery
             }
         }
 
-        static UnityEngine.Object ResolveReference(PMember m)
+        static UnityEngine.Object ResolveReference(string gid, string type)
         {
-            var go = ResolveGameObject(m.gid);
+            var go = ResolveGameObject(gid);
             if (go == null) return null;
-            var ct = ResolveType(m.type);
+            var ct = ResolveType(type);
             if (ct == null) return null;                                  // type not compiled — leave unwired
             if (ct == typeof(RectTransform)) return go.GetComponent<RectTransform>();
             return go.GetComponent(ct);                                    // uGUI control/graphic OR a sub-view

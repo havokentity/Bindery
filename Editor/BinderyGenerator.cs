@@ -145,6 +145,7 @@ namespace Bindery
                     // the same fully-qualified type (Build doesn't know these — they're a generator concern).
                     model.namespaceName = namespaceName;
                     model.baseClass = baseClass;
+                    model.collectionsAsArray = BinderySettings.SerializeCollectionsAsArray;
                     if (model.members.Count == 0)
                     {
                         Debug.LogWarning($"[Bindery] '{go.name}' has no bindable children — nothing to generate.");

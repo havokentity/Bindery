@@ -55,6 +55,7 @@ namespace Bindery
         public string className;      // "<RootName>View"
         public string namespaceName;  // the configured generated namespace (e.g. "Bindery.Generated")
         public string baseClass;      // fully-qualified base type (e.g. "Bindery.BinderyView")
+        public bool collectionsAsArray; // collections serialize as one T[] (vs an individual field each)
         public Transform root;        // the selected GameObject's transform
         public List<ViewMember> members;
     }

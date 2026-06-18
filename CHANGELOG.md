@@ -2,6 +2,15 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.9.0] — 2026-06-18
+
+- **Collections serialize as a single array.** A detected collection (`Slot0, Slot1, …`) now
+  serializes as ONE `[SerializeField] T[]` field — shown as a proper **list in the Inspector** —
+  instead of an individual field per element. On by default; **Project Settings ▸ Bindery ▸
+  Collections** has a checkbox to restore the per-element fields. The array is wired element-by-element.
+- **Wiring resilience.** A transient wiring failure (e.g. a stale serialized layout mid-recompile)
+  is now caught and retried after the next reload instead of aborting the whole wire pass.
+
 ## [0.8.0] — 2026-06-18
 
 - **Regenerate All Views.** `Tools ▸ Bindery ▸ Regenerate All Views` re-runs generation on every

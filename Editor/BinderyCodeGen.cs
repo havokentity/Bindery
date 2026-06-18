@@ -44,16 +44,30 @@ namespace Bindery
             sb.AppendLine("    public partial class " + v.className + " : " + BaseClassOf(v));
             sb.AppendLine("    {");
 
-            // Backing fields (flat on the view; nested scopes index back into these). Collected
-            // members keep their own [SerializeField] (still wired one-by-one); the lead of each
-            // group also gets a cached IReadOnlyList<T> field the collection accessor lazy-fills.
+            // Backing fields (flat on the view; nested scopes index back into these).
             foreach (var m in v.members)
             {
+                if (m.IsCollected)
+                {
+                    // A collection serializes as ONE T[] per group on its lead (shown as a list in the
+                    // Inspector) — or, when the setting is off, an individual field per element plus a
+                    // cached IReadOnlyList<T> the accessor lazy-fills.
+                    if (v.collectionsAsArray)
+                    {
+                        if (m.collectionLead)
+                            sb.AppendLine("        [SerializeField] " + m.csharpType + "[] " + CollectionField(m) + ";");
+                    }
+                    else
+                    {
+                        sb.AppendLine("        [SerializeField] " + m.csharpType + " " + m.FieldName + ";");
+                        if (m.collectionLead)
+                            sb.AppendLine("        " + ReadOnlyListType(m.csharpType) + " " + CollectionField(m) + ";");
+                    }
+                    continue;
+                }
                 sb.AppendLine("        [SerializeField] " + m.csharpType + " " + m.FieldName + ";");
                 if (m.isScope)
                     sb.AppendLine("        " + m.scopeTypeName + " " + m.FieldName + "Scope;");
-                if (m.collectionLead)
-                    sb.AppendLine("        " + ReadOnlyListType(m.csharpType) + " " + CollectionField(m) + ";");
             }
             if (v.members.Count > 0) sb.AppendLine();
 
@@ -119,6 +133,14 @@ namespace Bindery
         // "" on the view body or "_view." inside a scope class (the fields are flat on the view).
         static string EmitCollectionAccessor(ViewModel v, ViewMember lead, string indent, string fieldPrefix)
         {
+            string listType = ReadOnlyListType(lead.csharpType);
+
+            // Array mode: the serialized T[] field IS the collection (T[] implements IReadOnlyList<T>).
+            if (v.collectionsAsArray)
+                return indent + "public " + listType + " " + lead.collectionName
+                     + " => " + fieldPrefix + CollectionField(lead) + ";";
+
+            // Individual mode: lazily cache an array built from the per-element backing fields.
             var group = new List<ViewMember>();
             foreach (var m in v.members)
                 if (m.collectionName == lead.collectionName && m.parent == lead.parent && m.csharpType == lead.csharpType)
@@ -131,8 +153,6 @@ namespace Bindery
                 if (i > 0) elems.Append(", ");
                 elems.Append(fieldPrefix).Append(group[i].FieldName);
             }
-
-            string listType = ReadOnlyListType(lead.csharpType);
             return indent + "public " + listType + " " + lead.collectionName
                  + " => " + fieldPrefix + CollectionField(lead)
                  + " ??= new " + lead.csharpType + "[] { " + elems + " };";

@@ -36,6 +36,7 @@ namespace Bindery
         [SerializeField] string baseClass = DefaultBaseClass;
         [SerializeField] bool scaffoldButtonHandlers = true;
         [SerializeField] bool scaffoldControlHandlers = true;
+        [SerializeField] bool serializeCollectionsAsArray = true;
 
         static BinderySettings _instance;
 
@@ -101,6 +102,11 @@ namespace Bindery
         /// <summary>When generating a new view stub, pre-wire each non-button control's basic event
         /// (Toggle/Slider/Dropdown/InputField/… onValueChanged) to a named handler. On by default.</summary>
         public static bool ScaffoldControlHandlers => Instance.scaffoldControlHandlers;
+
+        /// <summary>Serialize a detected collection (Slot0, Slot1, …) as ONE <c>T[]</c> field — shown
+        /// as a list in the Inspector — instead of an individual <c>[SerializeField]</c> per element.
+        /// On by default. Off restores the per-element fields + a cached read-only accessor.</summary>
+        public static bool SerializeCollectionsAsArray => Instance.serializeCollectionsAsArray;
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.
@@ -275,6 +281,22 @@ namespace Bindery
                     {
                         s.scaffoldButtonHandlers = nextBtn;
                         s.scaffoldControlHandlers = nextCtrl;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Collections", EditorStyles.boldLabel);
+
+                    EditorGUI.BeginChangeCheck();
+                    bool nextArr = EditorGUILayout.ToggleLeft(
+                        new GUIContent("Serialize collections as a single array",
+                            "Repeated siblings (Slot0, Slot1, …) serialize as ONE array field shown as a " +
+                            "list in the Inspector, instead of an individual field per element. " +
+                            "Off restores the per-element fields."),
+                        s.serializeCollectionsAsArray);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.serializeCollectionsAsArray = nextArr;
                         Save();
                     }
 
