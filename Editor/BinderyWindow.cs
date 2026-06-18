@@ -272,7 +272,7 @@ namespace Bindery
                     }
 
                     if (GUILayout.Button("Select", GUILayout.Width(56))) Select(r);
-                    if (GUILayout.Button("Regen", GUILayout.Width(56))) Defer(() => { var go = TargetOf(r); if (go) { BinderyGenerator.Generate(new[] { go }); Rescan(); } });
+                    if (GUILayout.Button("Regen", GUILayout.Width(56))) Defer(() => { var go = TargetOf(r); if (go) { BinderyGenerator.Regenerate(new[] { go }); Rescan(); } });
                     if (GUILayout.Button("Remove", GUILayout.Width(62))) Defer(() => { var go = TargetOf(r); if (go) { BinderyGenerator.RemoveView(new[] { go }); Rescan(); } });
                 }
             }

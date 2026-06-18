@@ -2,6 +2,15 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.18.0] — 2026-06-18
+
+- **Smart Regenerate — re-wire instead of regenerate when only references are missing.** When a
+  view's generated code is already current (the hierarchy is unchanged) and only some wired
+  references went null, Regenerate now just **re-assigns them in place** from the live children — no
+  `.g.cs` rewrite, no recompile, no asset refresh (synchronous). A genuine structural change (a child
+  renamed / added / removed) still falls back to a full regenerate. Applies to the Bindery Views
+  window's **Regen**, the inspector's **Regenerate**, and **Tools ▸ Bindery ▸ Regenerate All Views**.
+
 ## [0.17.0] — 2026-06-18
 
 - **Cleaner generated code — short type names.** Built-in uGUI / TMP / `UnityEngine` types are now

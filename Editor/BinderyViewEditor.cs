@@ -34,7 +34,7 @@ namespace Bindery
                 if (GUILayout.Button("Regenerate"))
                 {
                     var gos = TargetObjects();
-                    EditorApplication.delayCall += () => BinderyGenerator.Generate(gos);
+                    EditorApplication.delayCall += () => BinderyGenerator.Regenerate(gos);
                 }
                 if (GUILayout.Button("Remove View…"))
                 {

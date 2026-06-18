@@ -72,7 +72,7 @@ namespace Bindery
                 return;
             }
             Debug.Log($"[Bindery] Regenerating {gos.Count} view(s) in the open scene(s)…");
-            Generate(gos.ToArray());
+            Regenerate(gos.ToArray());
         }
 
         [MenuItem("GameObject/Bindery/Remove Accessor Class", false, 31)]
@@ -186,6 +186,117 @@ namespace Bindery
             // Wire now too: when the generated code is unchanged no compile follows the
             // Refresh, so [DidReloadScripts] never fires — but the types already exist.
             BinderyWire.RequestWire();
+        }
+
+        // ---- smart regenerate --------------------------------------------------------------------
+
+        /// <summary>Regenerate views, but take the cheap path when a view's CODE is already current and
+        /// only its references went null: re-assign them in place — no file rewrite, no recompile, no
+        /// asset refresh. Anything that genuinely changed (renamed/added/removed child, prefab asset,
+        /// stale type) falls back to a full <see cref="Generate"/>.</summary>
+        public static void Regenerate(GameObject[] roots)
+        {
+            if (roots == null || roots.Length == 0) return;
+            var full = new List<GameObject>();
+            foreach (var go in roots)
+                if (!TryRewireInPlace(go)) full.Add(go);
+            if (full.Count > 0) Generate(full.ToArray());
+        }
+
+        // Re-assign a view's serialized references from the live hierarchy, IF the generated code still
+        // matches the current subtree (so the structure is unchanged — only the wiring is missing).
+        // Returns false (→ caller does a full regenerate) for prefab assets, a changed structure, or a
+        // view/type that can't be resolved yet.
+        static bool TryRewireInPlace(GameObject go)
+        {
+            if (go == null || !go.scene.IsValid()) return false;     // prefab assets go the full route
+            if (go.GetComponent<BinderyView>() == null) return false; // nothing here yet → full generate
+
+            // Rebuild the model exactly as Generate does. Sub-views are already attached, so an empty
+            // batch is enough — the hierarchy walker types them from their components.
+            var model = BinderyHierarchy.Build(go, BinderySettings.ClassSuffix, BinderySettings.TransparentPrefix);
+            model.namespaceName = BinderySettings.GeneratedNamespace;
+            model.baseClass = BinderySettings.BaseClass;
+            model.collectionsAsArray = BinderySettings.SerializeCollectionsAsArray;
+            if (model.members.Count == 0) return false;
+
+            // The code must already be current — otherwise the structure changed and a real regenerate
+            // (with its recompile) is required. This is the same comparison WriteIfChanged makes.
+            string gPath = GeneratedDir + "/" + model.className + ".g.cs";
+            if (!File.Exists(gPath) || File.ReadAllText(gPath) != BinderyCodeGen.EmitViewClass(model)) return false;
+
+            var type = ResolveType(model.namespaceName + "." + model.className);
+            if (type == null) return false;
+            var comp = go.GetComponent(type);
+            if (comp == null) return false;
+
+            var so = new SerializedObject(comp);
+
+            // Every backing field the model expects must exist on the compiled type (guards against a
+            // stale, pre-reload type). The non-serialized collection cache field is skipped naturally.
+            foreach (var m in model.members)
+            {
+                if (model.collectionsAsArray && m.IsCollected)
+                {
+                    if (!m.collectionLead) continue;
+                    if (so.FindProperty("_" + m.collectionName) == null) return false;
+                }
+                else if (so.FindProperty(m.FieldName) == null) return false;
+            }
+
+            // Size array fields first and COMMIT — a structural resize can drop value writes otherwise.
+            bool resized = false;
+            foreach (var m in model.members)
+                if (model.collectionsAsArray && m.IsCollected && m.collectionLead)
+                {
+                    so.FindProperty("_" + m.collectionName).arraySize = CollectionElements(model, m).Count;
+                    resized = true;
+                }
+            if (resized) { so.ApplyModifiedPropertiesWithoutUndo(); so.Update(); }
+
+            // Assign every reference from its live child.
+            foreach (var m in model.members)
+            {
+                if (model.collectionsAsArray && m.IsCollected)
+                {
+                    if (!m.collectionLead) continue;
+                    var prop = so.FindProperty("_" + m.collectionName);
+                    var elems = CollectionElements(model, m);
+                    for (int i = 0; i < elems.Count; i++)
+                        prop.GetArrayElementAtIndex(i).objectReferenceValue = ResolveOn(elems[i].node, elems[i].csharpType);
+                }
+                else
+                    so.FindProperty(m.FieldName).objectReferenceValue = ResolveOn(m.node, m.csharpType);
+            }
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(comp);
+            if (!Application.isPlaying && go.scene.IsValid())
+                EditorSceneManager.MarkSceneDirty(go.scene);
+
+            Debug.Log($"[Bindery] Re-wired {model.className} on '{go.name}' — code unchanged, references only " +
+                      "(no regenerate).", go);
+            return true;
+        }
+
+        // A collection's elements (the lead's group) in element-index order — mirrors BinderyWire.
+        static List<ViewMember> CollectionElements(ViewModel model, ViewMember lead)
+        {
+            var group = new List<ViewMember>();
+            foreach (var e in model.members)
+                if (e.collectionName == lead.collectionName && e.parent == lead.parent && e.csharpType == lead.csharpType)
+                    group.Add(e);
+            group.Sort((a, b) => a.collectionIndex.CompareTo(b.collectionIndex));
+            return group;
+        }
+
+        // The component of csharpType on a live child transform (RectTransform handled explicitly).
+        static UnityEngine.Object ResolveOn(Transform node, string csharpType)
+        {
+            if (node == null) return null;
+            var t = ResolveType(csharpType);
+            if (t == null) return null;
+            if (t == typeof(RectTransform)) return node.GetComponent<RectTransform>();
+            return node.GetComponent(t);
         }
 
         // ---- the typed view registry (BinderyViews) ----------------------------------------------

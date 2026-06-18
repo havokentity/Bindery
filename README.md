@@ -290,7 +290,10 @@ a status dot (green when fully wired, amber when one or more references have gon
 missing-reference count, and three buttons:
 
 - **Select** — pings and selects the object (or the prefab asset) in the project.
-- **Regen** — regenerates that single view in place.
+- **Regen** — re-syncs that view. When the generated code is already current and only its references
+  went null, it just **re-assigns them in place** — no script rewrite, no recompile, no asset
+  refresh; only a genuine structural change (a child renamed / added / removed) triggers a full
+  regenerate. (The inspector's **Regenerate** and **Regenerate All** take the same smart path.)
 - **Remove** — detaches the view and deletes its class files. Works on **prefab-asset** views too:
   the component is removed from the prefab via its loaded contents and the asset is saved, so no
   missing-script is left behind.
