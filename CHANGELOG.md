@@ -2,6 +2,15 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.6.1] — 2026-06-18
+
+- **Fix: cyclic assembly dependency from composed views.** A view that composes a sub-view
+  (a member typed `Bindery.Generated.FooterView`) made the asmdef-reference collector add the
+  generated assembly to its *own* references — a self-cycle Unity reports as "cyclic dependencies
+  … between Assembly-CSharp-Editor, Bindery.Generated", breaking the whole project's compile. The
+  generated assembly (and the predefined `Assembly-CSharp` / `Assembly-CSharp-Editor`) are now
+  skipped; a `[BinderyBind]` component sitting in `Assembly-CSharp` warns to move to its own asmdef.
+
 ## [0.6.0] — 2026-06-18
 
 - **Custom component binding.** Mark any of your own MonoBehaviours with `[Bindery.BinderyBind]`

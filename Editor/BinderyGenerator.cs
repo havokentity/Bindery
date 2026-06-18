@@ -304,6 +304,18 @@ namespace Bindery
             "Bindery.Runtime", "UnityEngine.UI", "Unity.TextMeshPro",
             // Unity's auto-referenced predefined modules — RectTransform / CanvasGroup / etc. resolve here.
             "UnityEngine", "UnityEngine.CoreModule", "mscorlib",
+            // The generated assembly itself: composed SUB-VIEW members (Bindery.Generated.FooterView)
+            // resolve here — never self-reference, that's a cycle.
+            "Bindery.Generated",
+        };
+
+        // Predefined assemblies an asmdef CANNOT reference — they auto-reference Bindery.Generated, so
+        // adding them back makes a cycle. A [BinderyBind] component in one of these must move to its
+        // own asmdef; we skip it (with a warning) instead of breaking the whole project's compile.
+        static readonly HashSet<string> PredefinedAsms = new HashSet<string>(System.StringComparer.Ordinal)
+        {
+            "Assembly-CSharp", "Assembly-CSharp-Editor",
+            "Assembly-CSharp-firstpass", "Assembly-CSharp-Editor-firstpass",
         };
 
         // Adds the defining assembly of every custom-bound ([BinderyBind]) member type in this model
@@ -318,7 +330,15 @@ namespace Bindery
                 var t = ResolveType(m.csharpType);
                 if (t == null) continue;
                 string asm = t.Assembly.GetName().Name;
-                if (!AlreadyReferencedAsms.Contains(asm)) acc.Add(asm);
+                if (AlreadyReferencedAsms.Contains(asm)) continue;
+                if (PredefinedAsms.Contains(asm))
+                {
+                    Debug.LogWarning($"[Bindery] '{m.csharpType}' lives in '{asm}', which the generated " +
+                        "assembly can't reference. Move that [BinderyBind] component into its own assembly " +
+                        "definition so the view compiles.", model.root);
+                    continue;
+                }
+                acc.Add(asm);
             }
         }
 
