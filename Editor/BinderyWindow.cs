@@ -1,12 +1,15 @@
 // =============================================================================
 // Bindery — a project panel (Window ▸ Bindery ▸ Views) that lists every generated
-// view in the open scene(s) AND in prefab assets, shows whether each has missing
-// references, and offers Select / Regenerate / Remove per row plus Regenerate-all
-// and Validate. Handy for managing views across a larger project.
+// view in the open scene(s) AND in prefab assets as a NESTED TREE that mirrors view
+// composition: a view generated on a child sits under the parent view that composes
+// it (SettingsPanelView ▸ FooterView ▸ …). Shows whether each has missing references,
+// and offers Select / Regenerate / Remove per row plus Regenerate-all and Validate.
 //
 // Rows are gathered on demand (open + Refresh) since scanning every prefab is not
 // free. Scene rows hold the live GameObject; prefab rows hold the asset path (the
 // loaded prefab is re-fetched on demand, since asset instances can be unloaded).
+// Nesting is by nearest-ancestor view in the transform hierarchy — exactly the
+// composition boundary Bindery uses — so the tree always matches the generated code.
 // =============================================================================
 
 using System.Collections.Generic;
@@ -21,7 +24,7 @@ namespace Bindery
         static void Open()
         {
             var w = GetWindow<BinderyWindow>("Bindery Views");
-            w.minSize = new Vector2(380, 200);
+            w.minSize = new Vector2(420, 200);
             w.Show();
         }
 
@@ -30,11 +33,25 @@ namespace Bindery
             public string typeName;     // generated class name
             public bool isPrefab;       // lives in a prefab asset (vs the open scene)
             public string location;     // scene-relative path, or the prefab asset path
+            public string goName;       // the GameObject the view sits on (leaf name)
             public GameObject sceneGo;  // the live object for scene rows
             public int missing;         // unwired serialized references
         }
 
-        readonly List<Row> _rows = new List<Row>();
+        // A view in the tree: its row + the views composed beneath it.
+        sealed class Node
+        {
+            public Row row;
+            public string id;                 // stable key for fold state
+            public int depth;
+            public BinderyView comp;          // only used while building (parent linkage)
+            public readonly List<Node> children = new List<Node>();
+        }
+
+        readonly List<Node> _roots = new List<Node>();
+        readonly HashSet<string> _collapsed = new HashSet<string>();   // ids the user folded shut
+        int _total;
+        bool _hasNesting;
         Vector2 _scroll;
 
         void OnEnable() => Rescan();
@@ -42,11 +59,15 @@ namespace Bindery
 
         void Rescan()
         {
-            _rows.Clear();
+            _roots.Clear();
+            _total = 0;
+            _hasNesting = false;
+
+            var all = new List<Node>();
+            var map = new Dictionary<BinderyView, Node>();
 
             foreach (var v in FindObjectsByType<BinderyView>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-                if (v != null)
-                    _rows.Add(new Row { typeName = v.GetType().Name, isPrefab = false, location = HierarchyPath(v.transform), sceneGo = v.gameObject, missing = CountMissing(v) });
+                if (v != null) Add(v, false, HierarchyPath(v.transform), all, map);
 
             foreach (var guid in AssetDatabase.FindAssets("t:Prefab"))
             {
@@ -54,12 +75,63 @@ namespace Bindery
                 var root = AssetDatabase.LoadAssetAtPath<GameObject>(path);
                 if (root == null) continue;
                 foreach (var v in root.GetComponentsInChildren<BinderyView>(true))
-                    if (v != null)
-                        _rows.Add(new Row { typeName = v.GetType().Name, isPrefab = true, location = path, sceneGo = null, missing = CountMissing(v) });
+                    if (v != null) Add(v, true, path, all, map);
             }
 
-            _rows.Sort((a, b) => string.CompareOrdinal(a.typeName, b.typeName));
+            // Link each view under its nearest ancestor view (same scene/prefab) — the rest are roots.
+            foreach (var n in all)
+            {
+                var parent = NearestAncestorView(n.comp);
+                if (parent != null && map.TryGetValue(parent, out var pn)) { pn.children.Add(n); _hasNesting = true; }
+                else _roots.Add(n);
+            }
+
+            _total = all.Count;
+            SortTree(_roots);
+            AssignDepth(_roots, 0);
+            foreach (var n in all) n.comp = null;   // don't pin prefab-asset components past the scan
             Repaint();
+        }
+
+        void Add(BinderyView v, bool isPrefab, string location, List<Node> all, Dictionary<BinderyView, Node> map)
+        {
+            var n = new Node
+            {
+                comp = v,
+                id = (isPrefab ? "P:" + location + ":" : "S:") + HierarchyPath(v.transform),
+                row = new Row
+                {
+                    typeName = v.GetType().Name,
+                    isPrefab = isPrefab,
+                    location = location,
+                    goName = v.gameObject.name,
+                    sceneGo = isPrefab ? null : v.gameObject,
+                    missing = CountMissing(v),
+                },
+            };
+            all.Add(n);
+            map[v] = n;
+        }
+
+        static BinderyView NearestAncestorView(BinderyView v)
+        {
+            for (var t = v.transform.parent; t != null; t = t.parent)
+            {
+                var pv = t.GetComponent<BinderyView>();
+                if (pv != null) return pv;
+            }
+            return null;
+        }
+
+        static void SortTree(List<Node> nodes)
+        {
+            nodes.Sort((a, b) => string.CompareOrdinal(a.row.typeName, b.row.typeName));
+            foreach (var n in nodes) SortTree(n.children);
+        }
+
+        static void AssignDepth(List<Node> nodes, int depth)
+        {
+            foreach (var n in nodes) { n.depth = depth; AssignDepth(n.children, depth + 1); }
         }
 
         // Count unwired serialized object references (including inside collection arrays); skips m_Script.
@@ -93,7 +165,12 @@ namespace Bindery
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60))) Rescan();
-                GUILayout.Label($"{_rows.Count} view(s)", EditorStyles.miniLabel);
+                GUILayout.Label($"{_total} view(s)", EditorStyles.miniLabel);
+                if (_hasNesting)
+                {
+                    if (GUILayout.Button("Expand", EditorStyles.toolbarButton, GUILayout.Width(56))) _collapsed.Clear();
+                    if (GUILayout.Button("Collapse", EditorStyles.toolbarButton, GUILayout.Width(62))) CollapseAll();
+                }
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Regenerate All", EditorStyles.toolbarButton))
                     Defer(() => { EditorApplication.ExecuteMenuItem("Tools/Bindery/Regenerate All Views"); Rescan(); });
@@ -106,24 +183,44 @@ namespace Bindery
                     Defer(() => EditorApplication.ExecuteMenuItem("Tools/Bindery/Generate Visual Script Playground"));
             }
 
-            if (_rows.Count == 0)
+            if (_total == 0)
             {
                 EditorGUILayout.HelpBox("No Bindery views found in the open scene(s) or prefab assets. Generate some, then Refresh.", MessageType.Info);
                 return;
             }
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            foreach (var r in _rows)
+            foreach (var n in _roots) DrawNode(n);
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawNode(Node n)
+        {
+            var r = n.row;
+            bool hasChildren = n.children.Count > 0;
+            bool expanded = !_collapsed.Contains(n.id);
+
+            using (new EditorGUILayout.HorizontalScope())
             {
+                if (n.depth > 0) GUILayout.Space(n.depth * 16);
                 using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
                 {
+                    if (hasChildren)
+                    {
+                        if (GUILayout.Button(expanded ? "▼" : "▶", EditorStyles.label, GUILayout.Width(16)))
+                        {
+                            if (expanded) _collapsed.Add(n.id); else _collapsed.Remove(n.id);
+                        }
+                    }
+                    else GUILayout.Space(16);
+
                     var prev = GUI.color;
                     GUI.color = r.missing == 0 ? new Color(0.4f, 0.85f, 0.4f) : new Color(0.95f, 0.8f, 0.3f);
                     GUILayout.Label("●", GUILayout.Width(14));
                     GUI.color = prev;
 
                     EditorGUILayout.LabelField(new GUIContent(r.typeName, r.location), EditorStyles.boldLabel, GUILayout.Width(150));
-                    EditorGUILayout.LabelField((r.isPrefab ? "prefab  " : "scene  ") + r.location, EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField(new GUIContent((r.isPrefab ? "prefab  " : "scene  ") + r.goName, r.location), EditorStyles.miniLabel);
 
                     GUILayout.FlexibleSpace();
                     if (r.missing > 0)
@@ -138,7 +235,24 @@ namespace Bindery
                     if (GUILayout.Button("Remove", GUILayout.Width(62))) Defer(() => { var go = TargetOf(r); if (go) { BinderyGenerator.RemoveView(new[] { go }); Rescan(); } });
                 }
             }
-            EditorGUILayout.EndScrollView();
+
+            if (hasChildren && expanded)
+                foreach (var c in n.children) DrawNode(c);
+        }
+
+        void CollapseAll()
+        {
+            _collapsed.Clear();
+            AddCollapsible(_roots);
+        }
+
+        void AddCollapsible(List<Node> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.children.Count > 0) _collapsed.Add(n.id);
+                AddCollapsible(n.children);
+            }
         }
 
         GameObject TargetOf(Row r) => r.isPrefab ? AssetDatabase.LoadAssetAtPath<GameObject>(r.location) : r.sceneGo;

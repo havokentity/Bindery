@@ -264,9 +264,20 @@ re-runs generation on every view in the open scene(s) — handy after changing a
 ## The Bindery Views window
 
 **`Window ▸ Bindery ▸ Views`** opens one panel listing every generated view across the project —
-those in the open scene(s) **and** those baked into prefab assets. Each row shows the view's class
-name, where it lives, a status dot (green when fully wired, amber when one or more references have
-gone missing) with the missing-reference count, and three buttons:
+those in the open scene(s) **and** those baked into prefab assets — as a **nested tree that mirrors
+composition**: a view generated on a child sits *under* the parent view that composes it, so the
+panel reads the same way the code does:
+
+```text
+▼ SettingsPanelView   scene  SettingsPanel
+    ▼ FooterView       scene  Footer          ← composed sub-view, nested under its parent
+  PanelView           scene  Panel            ← a separate root
+```
+
+Nesting is by nearest-ancestor view (exactly Bindery's composition boundary), so the tree always
+matches what the generator produced. Each row shows the view's class name, the GameObject it sits on,
+a status dot (green when fully wired, amber when one or more references have gone missing) with the
+missing-reference count, and three buttons:
 
 - **Select** — pings and selects the object (or the prefab asset) in the project.
 - **Regen** — regenerates that single view in place.
@@ -274,9 +285,9 @@ gone missing) with the missing-reference count, and three buttons:
   the component is removed from the prefab via its loaded contents and the asset is saved, so no
   missing-script is left behind.
 
-The toolbar adds **Regenerate All** and **Validate** for the whole set, and **Refresh** to re-scan
-(scanning every prefab isn't free, so the list refreshes on open, on focus, and on demand). Handy on
-larger projects where views are scattered across scenes and prefabs.
+The toolbar adds **Regenerate All** and **Validate** for the whole set, **Refresh** to re-scan, and
+(when there's nesting) **Expand** / **Collapse** for the tree. The list refreshes on open, on focus,
+and on demand — handy on larger projects where views are scattered across scenes and prefabs.
 
 ## Visual Scripting playground
 

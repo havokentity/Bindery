@@ -2,6 +2,14 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.15.0] — 2026-06-18
+
+- **Bindery Views window is now a nested tree.** The panel lists views as a tree that mirrors
+  composition — a view generated on a child nests *under* the parent view that composes it
+  (`SettingsPanelView ▸ FooterView`), by nearest-ancestor view (exactly Bindery's composition
+  boundary), so it reads the same way the code does. Foldable per node, with **Expand** / **Collapse**
+  on the toolbar when there's nesting; each row keeps its status dot, Select / Regen / Remove.
+
 ## [0.14.0] — 2026-06-18
 
 - **Lazy binding — works on inactive views.** Every generated accessor (and each `BinderyViews`
