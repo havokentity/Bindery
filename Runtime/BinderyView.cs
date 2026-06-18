@@ -4,7 +4,10 @@
 // adds a [SerializeField] reference + a typed accessor for each bindable built-in
 // uGUI child of the GameObject it lives on. Those references are wired by the
 // Bindery generator at edit time, so at runtime there is no reflection and no
-// string-keyed Find — every accessor is a direct field read.
+// string-keyed Find — each accessor is a near-direct field read that first calls
+// EnsureBound() (lazy + idempotent), so touching any member from anywhere — any
+// Awake/Start, any order, even on an INACTIVE view Unity hasn't Awoken — runs
+// OnBind() exactly once before the reference is handed back.
 //
 // Add your own behaviour in a SEPARATE partial file (the generator drops an
 // editable `FooView.cs` stub next to the `.g.cs` for exactly this) so a
@@ -65,8 +68,11 @@ namespace Bindery
 
         protected virtual void Awake() { EnsureBound(); }
 
-        /// <summary>Runs <see cref="OnBind"/> exactly once. Awake calls it; you can call it
-        /// yourself earlier (e.g. right after the view is enabled) and it stays idempotent.</summary>
+        /// <summary>Runs <see cref="OnBind"/> exactly once. Awake calls it, and so does every generated
+        /// accessor on first touch — so a view binds even while its GameObject is inactive (Unity skips
+        /// Awake there). Idempotent, and re-entrancy-safe: the guard is set BEFORE <see cref="OnBind"/>
+        /// runs, so accessors used inside OnBind don't recurse. (OnBind that needs an active object —
+        /// e.g. StartCoroutine — still can't run early on an inactive view; that's a Unity limit.)</summary>
         public void EnsureBound()
         {
             if (_bound) return;

@@ -2,6 +2,17 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.14.0] — 2026-06-18
+
+- **Lazy binding — works on inactive views.** Every generated accessor (and each `BinderyViews`
+  registry getter) now calls `EnsureBound()` before returning, so a view runs its `OnBind()` the
+  instant any member is touched — from any `Awake`/`Start`, in any script order, and **even while
+  the view's GameObject is inactive**, where Unity never calls `Awake`. Reaching
+  `someInactiveView.OkButton` resolves the (always-deserialized) reference *and* binds the view.
+  `EnsureBound` is idempotent and re-entrancy-safe (the guard is set before `OnBind` runs), so
+  `Awake` and the accessors all funnel through one binding. (`OnBind` work that *requires* an active
+  object — e.g. `StartCoroutine` — still can't run early on an inactive view; that's a Unity limit.)
+
 ## [0.13.0] — 2026-06-18
 
 - **`BinderyViews` registry.** A single generated static class exposes every view by a typed,

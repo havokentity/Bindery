@@ -125,7 +125,7 @@ body, ready for you to fill in:
 ```csharp
 public partial class SettingsPanelView
 {
-    protected override void OnBind()   // runs once, before Awake completes
+    protected override void OnBind()   // runs once, on first access (or Awake) — see below
     {
         Footer.OkButton.onClick.AddListener(OnOkButtonClicked);
         VolumeSlider.onValueChanged.AddListener(OnVolumeSliderChanged);
@@ -152,6 +152,17 @@ controls present at first generation.)
 
 Regenerate any time (renamed a child, added a control) — the `.g.cs` is rewritten,
 your `.cs` is left alone, and the live references are re-wired.
+
+### Binding is lazy — inactive views included
+
+`OnBind()` runs **once, on first touch** — every generated accessor calls `EnsureBound()` before
+handing back its reference. So the moment any code reaches a view's member — from any `Awake` /
+`Start`, in any script order, through `BinderyViews`, a sub-view, or a held reference — the view
+binds itself. Crucially this works **even while the view's GameObject is inactive**, where Unity
+never calls `Awake`: `someInactiveView.OkButton.onClick.AddListener(…)` both resolves the (always
+deserialized) reference *and* runs the view's own `OnBind`. It's idempotent — `Awake` and the
+accessors all funnel through the same one-time `EnsureBound`. (The one thing that can't run early on
+an inactive object is `OnBind` work that *needs* it active, e.g. `StartCoroutine` — a Unity limit.)
 
 ## Composing views
 

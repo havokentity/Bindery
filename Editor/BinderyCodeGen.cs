@@ -85,9 +85,10 @@ namespace Bindery
                 }
                 if (m.isScope)
                     sb.AppendLine("        public " + m.scopeTypeName + " " + m.identifier
-                                + " => " + m.FieldName + "Scope ??= new " + m.scopeTypeName + "(this);");
+                                + " { get { EnsureBound(); return " + m.FieldName + "Scope ??= new " + m.scopeTypeName + "(this); } }");
                 else
-                    sb.AppendLine("        public " + m.csharpType + " " + m.identifier + " => " + m.FieldName + ";");
+                    sb.AppendLine("        public " + m.csharpType + " " + m.identifier
+                                + " { get { EnsureBound(); return " + m.FieldName + "; } }");
             }
 
             // One nested class per container scope, exposing its direct children.
@@ -99,8 +100,8 @@ namespace Bindery
                 sb.AppendLine("        {");
                 sb.AppendLine("            readonly " + v.className + " _view;");
                 sb.AppendLine("            internal " + s.scopeTypeName + "(" + v.className + " view) { _view = view; }");
-                sb.AppendLine("            public RectTransform RectTransform => _view." + s.FieldName + ";");
-                sb.AppendLine("            public GameObject GameObject => _view." + s.FieldName + " != null ? _view." + s.FieldName + ".gameObject : null;");
+                sb.AppendLine("            public RectTransform RectTransform { get { _view.EnsureBound(); return _view." + s.FieldName + "; } }");
+                sb.AppendLine("            public GameObject GameObject { get { _view.EnsureBound(); return _view." + s.FieldName + " != null ? _view." + s.FieldName + ".gameObject : null; } }");
                 foreach (var c in v.members)
                 {
                     if (c.parent != s.node) continue;
@@ -113,9 +114,10 @@ namespace Bindery
                     }
                     if (c.isScope)
                         sb.AppendLine("            public " + c.scopeTypeName + " " + c.identifier
-                                    + " => _view." + c.FieldName + "Scope ??= new " + c.scopeTypeName + "(_view);");
+                                    + " { get { _view.EnsureBound(); return _view." + c.FieldName + "Scope ??= new " + c.scopeTypeName + "(_view); } }");
                     else
-                        sb.AppendLine("            public " + c.csharpType + " " + c.identifier + " => _view." + c.FieldName + ";");
+                        sb.AppendLine("            public " + c.csharpType + " " + c.identifier
+                                    + " { get { _view.EnsureBound(); return _view." + c.FieldName + "; } }");
                 }
                 sb.AppendLine("        }");
             }
@@ -134,11 +136,14 @@ namespace Bindery
         static string EmitCollectionAccessor(ViewModel v, ViewMember lead, string indent, string fieldPrefix)
         {
             string listType = ReadOnlyListType(lead.csharpType);
+            // Touching the accessor binds the view first (lazy + idempotent), so it works from anywhere
+            // — any Awake/Start, any order, even on an inactive view that Unity hasn't Awoken.
+            string bind = fieldPrefix + "EnsureBound();";
 
             // Array mode: the serialized T[] field IS the collection (T[] implements IReadOnlyList<T>).
             if (v.collectionsAsArray)
                 return indent + "public " + listType + " " + lead.collectionName
-                     + " => " + fieldPrefix + CollectionField(lead) + ";";
+                     + " { get { " + bind + " return " + fieldPrefix + CollectionField(lead) + "; } }";
 
             // Individual mode: lazily cache an array built from the per-element backing fields.
             var group = new List<ViewMember>();
@@ -154,8 +159,8 @@ namespace Bindery
                 elems.Append(fieldPrefix).Append(group[i].FieldName);
             }
             return indent + "public " + listType + " " + lead.collectionName
-                 + " => " + fieldPrefix + CollectionField(lead)
-                 + " ??= new " + lead.csharpType + "[] { " + elems + " };";
+                 + " { get { " + bind + " return " + fieldPrefix + CollectionField(lead)
+                 + " ??= new " + lead.csharpType + "[] { " + elems + " }; } }";
         }
 
         // The cached array field name for a group, e.g. "_Slots" (flat on the view, like backing fields).
@@ -350,10 +355,18 @@ namespace Bindery
             {
                 string field = "_" + property;
                 sb.AppendLine("        static " + typeName + " " + field + ";");
-                sb.AppendLine("        /// <summary>The <see cref=\"" + typeName + "\"/> in the loaded scene(s), or null if none.</summary>");
-                sb.AppendLine("        public static " + typeName + " " + property + " =>");
-                sb.AppendLine("            " + field + " ? " + field + " : (" + field +
-                              " = Object.FindFirstObjectByType<" + typeName + ">(FindObjectsInactive.Include));");
+                sb.AppendLine("        /// <summary>The <see cref=\"" + typeName + "\"/> in the loaded scene(s), or null if none.");
+                sb.AppendLine("        /// Found (including inactive) on first use, cached, and bound before it's returned.</summary>");
+                sb.AppendLine("        public static " + typeName + " " + property);
+                sb.AppendLine("        {");
+                sb.AppendLine("            get");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (!" + field + ") " + field +
+                              " = Object.FindFirstObjectByType<" + typeName + ">(FindObjectsInactive.Include);");
+                sb.AppendLine("                if (" + field + ") " + field + ".EnsureBound();");
+                sb.AppendLine("                return " + field + ";");
+                sb.AppendLine("            }");
+                sb.AppendLine("        }");
                 sb.AppendLine();
             }
             sb.AppendLine("        /// <summary>Forget every cached lookup — call after loading or unloading a scene.</summary>");
