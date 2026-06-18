@@ -2,6 +2,17 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.19.0] — 2026-06-18
+
+- **`BinderyViews` registry is now opt-in per view.** Each row of the Bindery Views window has a
+  **checkbox** that controls whether that view type is exposed in `BinderyViews`. It's **off by
+  default** — except a view sitting on a **`Canvas`** (a screen / panel root), which defaults **on** —
+  so the registry stays a short list of top-level screens instead of every nested sub-view. The
+  per-type setting is stored in `ProjectSettings/BinderySettings.asset` (so it's deterministic
+  regardless of which scenes are open and shareable across the team); toggling it rewrites
+  `BinderyViews.g.cs`. **Note:** views generated before this version aren't opted in until they're
+  regenerated or first appear in the window (where the Canvas default is applied).
+
 ## [0.18.0] — 2026-06-18
 
 - **Smart Regenerate — re-wire instead of regenerate when only references are missing.** When a

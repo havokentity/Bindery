@@ -39,6 +39,12 @@ namespace Bindery
         [SerializeField] bool serializeCollectionsAsArray = true;
         [SerializeField] bool generateViewsRegistry = true;
 
+        // Per-view-type opt-in for the BinderyViews registry. Presence = "default already decided";
+        // include = whether it gets a typed property. Seeded the first time a view is seen (off, or ON
+        // when it sits on a Canvas), then toggled from the Bindery Views window.
+        [System.Serializable] struct RegistryEntry { public string type; public bool include; }
+        [SerializeField] List<RegistryEntry> registryEntries = new List<RegistryEntry>();
+
         static BinderySettings _instance;
 
         /// <summary>The single project-wide settings object, loaded from (or defaulted for)
@@ -113,6 +119,48 @@ namespace Bindery
         /// cached property per generated view (<c>BinderyViews.SettingsPanel</c>), kept in sync with the
         /// set of views as they're generated/removed. On by default.</summary>
         public static bool GenerateViewsRegistry => Instance.generateViewsRegistry;
+
+        // ---- BinderyViews registry membership (per view type) -------------------------
+        static int RegistryIndexOf(string typeName)
+        {
+            var list = Instance.registryEntries;
+            for (int i = 0; i < list.Count; i++) if (list[i].type == typeName) return i;
+            return -1;
+        }
+
+        /// <summary>Whether this view type already has a recorded registry-inclusion setting.</summary>
+        public static bool RegistryKnown(string typeName) => RegistryIndexOf(typeName) >= 0;
+
+        /// <summary>Whether this view type is included in the generated <c>BinderyViews</c> registry.</summary>
+        public static bool RegistryIncludes(string typeName)
+        {
+            int i = RegistryIndexOf(typeName);
+            return i >= 0 && Instance.registryEntries[i].include;
+        }
+
+        /// <summary>Seed a view type's default the first time it's seen — off in general, ON when the
+        /// view sits on a Canvas. No-op once the type has any recorded setting.</summary>
+        public static void EnsureRegistryDefault(string typeName, bool hasCanvas)
+        {
+            if (string.IsNullOrEmpty(typeName) || RegistryKnown(typeName)) return;
+            Instance.registryEntries.Add(new RegistryEntry { type = typeName, include = hasCanvas });
+            Save();
+        }
+
+        /// <summary>Explicitly set whether a view type is in the registry (from the window checkbox).</summary>
+        public static void SetRegistryInclude(string typeName, bool include)
+        {
+            if (string.IsNullOrEmpty(typeName)) return;
+            var list = Instance.registryEntries;
+            int i = RegistryIndexOf(typeName);
+            if (i >= 0)
+            {
+                if (list[i].include == include) return;
+                var e = list[i]; e.include = include; list[i] = e;
+            }
+            else list.Add(new RegistryEntry { type = typeName, include = include });
+            Save();
+        }
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.

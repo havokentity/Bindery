@@ -30,7 +30,8 @@ namespace Bindery
 
         sealed class Row
         {
-            public string typeName;     // generated class name
+            public string typeName;     // generated class name (simple)
+            public string fullTypeName; // namespace-qualified — the registry-membership key
             public bool isPrefab;       // lives in a prefab asset (vs the open scene)
             public string location;     // scene-relative path, or the prefab asset path
             public string goName;       // the GameObject the view sits on (leaf name)
@@ -95,6 +96,10 @@ namespace Bindery
 
         void Add(BinderyView v, bool isPrefab, string location, List<Node> all, Dictionary<BinderyView, Node> map)
         {
+            // Seed the registry default the first time we see a type (off, or ON when it's on a Canvas)
+            // so the checkbox shows a sensible initial state even for views generated before this existed.
+            BinderySettings.EnsureRegistryDefault(v.GetType().FullName, v.GetComponent<Canvas>() != null);
+
             var n = new Node
             {
                 comp = v,
@@ -102,6 +107,7 @@ namespace Bindery
                 row = new Row
                 {
                     typeName = v.GetType().Name,
+                    fullTypeName = v.GetType().FullName,
                     isPrefab = isPrefab,
                     location = location,
                     goName = v.gameObject.name,
@@ -172,6 +178,8 @@ namespace Bindery
                 return;
             }
 
+            EditorGUILayout.LabelField("  ☑ = exposed in the BinderyViews registry (on by default for views on a Canvas)",
+                EditorStyles.miniLabel);
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
             foreach (var n in _roots) DrawNode(n);
             EditorGUILayout.EndScrollView();
@@ -246,6 +254,18 @@ namespace Bindery
                 if (n.depth > 0) GUILayout.Space(n.depth * 16);
                 using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
                 {
+                    // Per-TYPE: include this view in the generated BinderyViews registry. Toggling
+                    // rewrites BinderyViews.g.cs. (Multiple instances of a type share one setting.)
+                    bool inc = BinderySettings.RegistryIncludes(r.fullTypeName);
+                    bool newInc = EditorGUILayout.Toggle(
+                        new GUIContent("", "Include " + r.typeName + " in the BinderyViews registry"),
+                        inc, GUILayout.Width(16));
+                    if (newInc != inc)
+                    {
+                        BinderySettings.SetRegistryInclude(r.fullTypeName, newInc);
+                        Defer(() => { BinderyGenerator.RegenerateRegistry(); Rescan(); });
+                    }
+
                     if (hasChildren)
                     {
                         if (GUILayout.Button(expanded ? "▼" : "▶", EditorStyles.label, GUILayout.Width(16)))

@@ -231,10 +231,11 @@ footer.GetParentView<SettingsPanelView>().VolumeSlider.value = 1f;  // up, back 
   view via a cached `GetComponentInParent` — no runtime string lookup.
 - A `~`-transparent node still wins — it's ignored even if it carries a view.
 
-## One registry for every view
+## One registry for your top-level views
 
-Bindery keeps a single generated **`BinderyViews`** class with one typed, cached property per view —
-so you can reach any view from anywhere without a `FindObjectOfType` of your own:
+Bindery keeps a single generated **`BinderyViews`** class with one typed, cached property per
+**opted-in** view — so you can reach a screen/panel from anywhere without a `FindObjectOfType` of
+your own:
 
 ```csharp
 using Bindery.Generated;
@@ -246,9 +247,15 @@ var hp = BinderyViews.Hud.PlayerHealth;     // each property is typed as its vie
 Each property finds its view in the loaded scene(s) on first use and caches it (a destroyed/reloaded
 view is re-found automatically); `BinderyViews.Refresh()` clears the caches after a scene change. The
 property name is the view's class name minus the suffix (`SettingsPanelView` → `SettingsPanel`),
-disambiguated if two would collide. The registry **regenerates itself** as you add and remove views —
-no upkeep — and lives in the same generated assembly + namespace as the views. Turn it off under
-**Project Settings ▸ Bindery ▸ View registry** (it's deleted on the next reload).
+disambiguated if two would collide.
+
+**Membership is per view type, opt-in.** A checkbox on each row of the **Bindery Views** window
+(`Window ▸ Bindery ▸ Views`) controls whether that view is exposed in `BinderyViews`. It's **off by
+default** — except a view that sits on a **`Canvas`** (a screen / panel root), which defaults **on** —
+so the registry stays a short list of your top-level screens, not every nested sub-view. Toggling a
+checkbox rewrites `BinderyViews.g.cs`. The registry otherwise maintains itself as views are added and
+removed, and lives in the same generated assembly + namespace as the views. The whole feature can be
+turned off under **Project Settings ▸ Bindery ▸ View registry**.
 
 ## Removing a view
 
@@ -287,8 +294,10 @@ panel reads the same way the code does:
 Nesting is by nearest-ancestor view (exactly Bindery's composition boundary), so the tree always
 matches what the generator produced. Each row shows the view's class name, the GameObject it sits on,
 a status dot (green when fully wired, amber when one or more references have gone missing) with the
-missing-reference count, and three buttons:
+missing-reference count, a **registry checkbox**, and three buttons:
 
+- **☑ (leftmost)** — expose this view type in the [`BinderyViews` registry](#one-registry-for-your-top-level-views).
+  Off by default; on by default for views on a `Canvas`. Toggling rewrites `BinderyViews.g.cs`.
 - **Select** — pings and selects the object (or the prefab asset) in the project.
 - **Regen** — re-syncs that view. When the generated code is already current and only its references
   went null, it just **re-assigns them in place** — no script rewrite, no recompile, no asset

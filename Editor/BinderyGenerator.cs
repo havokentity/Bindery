@@ -169,6 +169,11 @@ namespace Bindery
                     WriteIfChanged(GeneratedDir + "/" + model.className + ".g.cs", BinderyCodeGen.EmitViewClass(model));
                     WriteStubIfAbsent(model, viewsDir);
 
+                    // Seed the registry default the first time this view type is generated: off, unless
+                    // it sits on a Canvas (a screen/panel root), which defaults to included.
+                    BinderySettings.EnsureRegistryDefault(namespaceName + "." + model.className,
+                        go.GetComponent<Canvas>() != null);
+
                     CollectCustomAssemblies(model, extraAsmRefs);
                     BinderyWire.Enqueue(model);
                     queued = true;
@@ -343,6 +348,7 @@ namespace Bindery
                 .Where(t => !t.IsAbstract && !t.IsGenericTypeDefinition
                             && t.Assembly.GetName().Name == GeneratedAssemblyName
                             && t.FullName != baseName
+                            && BinderySettings.RegistryIncludes(t.FullName)
                             && (excludeClassNames == null || !excludeClassNames.Contains(t.Name)))
                 .OrderBy(t => t.Name, StringComparer.Ordinal)
                 .ThenBy(t => t.FullName, StringComparer.Ordinal)
