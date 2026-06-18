@@ -1,0 +1,153 @@
+name: Validate package
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lightweight validation — runs with no Unity license.
+  # Checks:
+  #   1. package.json is valid JSON and has the required UPM fields.
+  #   2. Every .cs / .asmdef / package.json under Runtime/ and Editor/ has a
+  #      sibling .meta file (missing metas break asset-database imports).
+  #   3. Every .meta guid is unique across the repo (duplicate guids cause
+  #      silent asset conflicts at import time).
+  # ---------------------------------------------------------------------------
+  validate-package:
+    name: Validate package structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 1. Validate package.json
+      # -----------------------------------------------------------------------
+      - name: Validate package.json (JSON syntax + required fields)
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          with open("package.json") as f:
+              try:
+                  pkg = json.load(f)
+              except json.JSONDecodeError as e:
+                  print(f"ERROR: package.json is not valid JSON: {e}", file=sys.stderr)
+                  sys.exit(1)
+
+          required = ["name", "version", "unity"]
+          missing = [k for k in required if k not in pkg]
+          if missing:
+              print(f"ERROR: package.json is missing required field(s): {', '.join(missing)}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: package.json  name={pkg['name']}  version={pkg['version']}  unity={pkg['unity']}")
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 2. Every tracked source file must have a sibling .meta
+      # -----------------------------------------------------------------------
+      - name: Check for missing .meta files
+        run: |
+          missing=0
+
+          # Check .cs, .asmdef, and package.json under Runtime/ and Editor/.
+          while IFS= read -r -d '' file; do
+            # Skip files that are themselves .meta files
+            [[ "$file" == *.meta ]] && continue
+
+            meta="${file}.meta"
+            if [[ ! -f "$meta" ]]; then
+              echo "MISSING .meta: $meta"
+              missing=$((missing + 1))
+            fi
+          done < <(find Runtime Editor -type f \( -name "*.cs" -o -name "*.asmdef" -o -name "package.json" \) -print0)
+
+          if [[ $missing -gt 0 ]]; then
+            echo "ERROR: $missing file(s) are missing a .meta sibling." >&2
+            exit 1
+          fi
+
+          echo "OK: all source files have .meta files."
+
+      # -----------------------------------------------------------------------
+      # 3. Every .meta guid must be unique (Samples~ excluded — Unity generates
+      #    those on import and they won't exist in the repo anyway).
+      # -----------------------------------------------------------------------
+      - name: Check for duplicate .meta guids
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          from pathlib import Path
+
+          guid_re = re.compile(r'^guid:\s*([0-9a-f]{32})', re.MULTILINE)
+
+          seen = {}   # guid -> first file path
+          dupes = []
+
+          for meta in sorted(Path(".").rglob("*.meta")):
+              # Skip anything under Samples~ (not tracked, but guard anyway)
+              if "Samples~" in meta.parts:
+                  continue
+              text = meta.read_text(errors="replace")
+              m = guid_re.search(text)
+              if not m:
+                  continue
+              guid = m.group(1)
+              if guid in seen:
+                  dupes.append((guid, seen[guid], str(meta)))
+              else:
+                  seen[guid] = str(meta)
+
+          if dupes:
+              for guid, first, second in dupes:
+                  print(f"DUPLICATE guid {guid}:\n  {first}\n  {second}", file=sys.stderr)
+              print(f"\nERROR: {len(dupes)} duplicate guid(s) found.", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: {len(seen)} unique guid(s) — no duplicates.")
+          EOF
+
+# ---------------------------------------------------------------------------
+# Full compile + test via GameCI (DISABLED — requires a UNITY_LICENSE secret).
+#
+# To enable:
+#   1. Obtain a Unity license file and add it as a repo secret named
+#      UNITY_LICENSE (see https://game.ci/docs/github/activation).
+#   2. Uncomment the job below, remove the `if: false` guard, and push.
+#
+# This job clones the package into a temporary Unity project and runs the
+# Editor test suite (EditMode + PlayMode) so that every generated .cs file
+# is actually compiled by the real Unity compiler.
+# ---------------------------------------------------------------------------
+#  unity-test:
+#    name: Compile & test (Unity ${{ matrix.unity-version }})
+#    runs-on: ubuntu-latest
+#    if: false   # <- remove this line after adding UNITY_LICENSE secret
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        unity-version:
+#          - 2022.3.56f1
+#          - 6000.0.47f1
+#    steps:
+#      - uses: actions/checkout@v4
+#
+#      - name: Run Unity tests
+#        uses: game-ci/unity-test-runner@v4
+#        env:
+#          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+#        with:
+#          unityVersion: ${{ matrix.unity-version }}
+#          # Point GameCI at the repo root — it acts as a package under test.
+#          projectPath: .
+#          testMode: editmode
+#          # Uncomment for PlayMode tests once a test scene exists:
+#          # testMode: all
+#
+#      - uses: actions/upload-artifact@v4
+#        if: always()
+#        with:
+#          name: unity-test-results-${{ matrix.unity-version }}
+#          path: artifacts/

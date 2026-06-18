@@ -2,6 +2,30 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.6.0] — 2026-06-18
+
+- **Custom component binding.** Mark any of your own MonoBehaviours with `[Bindery.BinderyBind]`
+  and Bindery surfaces it as a strongly-typed control leaf, just like a built-in. The generated
+  asmdef automatically references the assembly that defines the component so the view compiles.
+  (That assembly must not reference `Bindery.Generated` back — keep `[BinderyBind]` components in
+  their own leaf assembly, a v1 limitation.)
+- **`CanvasGroup` is bindable** — surfaced as a typed leaf so you can drive alpha / interactable /
+  blocksRaycasts through the view.
+- **Collection accessors.** 2+ sibling children of the same bindable kind whose names share a stem
+  and a trailing index — `Slot0, Slot1, Slot2`, `Slot 0/Slot 1`, `Item (1)/Item (2)` — surface as
+  ONE ordered, read-only accessor (`view.Slots`, an `IReadOnlyList<Button>`) instead of N. Each
+  element keeps its own wired field; the collection is a cached array in index order. Works at the
+  root and in scopes; a lone `Slot0` stays a single accessor; mixed types aren't grouped.
+- **Configurable generated namespace + base class.** Project Settings ▸ Bindery now sets the
+  **generated namespace** (default `Bindery.Generated`) and the **view base class** (default
+  `Bindery.BinderyView`), applied across the `.g.cs`, the stub, the asmdef `rootNamespace`, and
+  wiring. The base must still derive from `Bindery.BinderyView`.
+- **Validate Views command.** `Tools ▸ Bindery ▸ Validate Views in Scene` (and `… in Selection`)
+  scans every `BinderyView` — including inactive — and logs a clickable warning for any whose
+  references have gone null.
+- **Sample + tests + CI.** An importable *Accessor View Demo* sample, an EditMode test suite, and
+  a lightweight package-validation GitHub Actions workflow now ship with the package.
+
 ## [0.5.0] — 2026-06-17
 
 - **Composable views.** Generate a view on a subobject and its ancestors compose it as a

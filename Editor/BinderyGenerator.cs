@@ -78,8 +78,16 @@ namespace Bindery
             string viewsDir = ResolveViewsDir();
             Directory.CreateDirectory(viewsDir);
 
-            bool wroteAsmdef = WriteIfChanged(AsmdefPath, BinderyCodeGen.EmitAsmdef());
-            wroteAsmdef |= RemoveLegacyAsmdef();   // the asmdef used to live in Generated/
+            string namespaceName = BinderySettings.GeneratedNamespace;
+            string baseClass = BinderySettings.BaseClass;
+
+            // The asmdef is written AFTER the view models are built (below), so we know which extra
+            // assemblies any [BinderyBind] custom components need referenced. Drop the legacy copy now.
+            bool wroteAsmdef = RemoveLegacyAsmdef();   // the asmdef used to live in Generated/
+
+            // Assemblies that DEFINE custom-bound ([BinderyBind]) component types used across the
+            // generated views — the generated asmdef must reference these or those views won't compile.
+            var extraAsmRefs = new HashSet<string>(System.StringComparer.Ordinal);
 
             string suffix = BinderySettings.ClassSuffix;
             string transparentPrefix = BinderySettings.TransparentPrefix;
@@ -106,11 +114,15 @@ namespace Bindery
                 // compose a sub-view whose component isn't attached yet (it attaches post-compile).
                 var batch = new Dictionary<Transform, string>();
                 foreach (var go in worklist)
-                    batch[go.transform] = BinderyCodeGen.GeneratedNamespace + "." + BinderyHierarchy.ClassName(go, suffix);
+                    batch[go.transform] = namespaceName + "." + BinderyHierarchy.ClassName(go, suffix);
 
                 foreach (var go in worklist)
                 {
                     var model = BinderyHierarchy.Build(go, suffix, transparentPrefix, batch);
+                    // Stamp the configured namespace + base class so codegen and BinderyWire emit/resolve
+                    // the same fully-qualified type (Build doesn't know these — they're a generator concern).
+                    model.namespaceName = namespaceName;
+                    model.baseClass = baseClass;
                     if (model.members.Count == 0)
                     {
                         Debug.LogWarning($"[Bindery] '{go.name}' has no bindable children — nothing to generate.");
@@ -120,12 +132,17 @@ namespace Bindery
                     WriteIfChanged(GeneratedDir + "/" + model.className + ".g.cs", BinderyCodeGen.EmitViewClass(model));
                     WriteStubIfAbsent(model, viewsDir);
 
+                    CollectCustomAssemblies(model, extraAsmRefs);
                     BinderyWire.Enqueue(model);
                     queued = true;
                     string note = ancestors.Contains(go.GetInstanceID()) ? " (recomposed ancestor)" : "";
                     Debug.Log($"[Bindery] Generated {model.className} ({model.members.Count} members) for '{go.name}'{note}.", go);
                 }
             }
+
+            // Now that every model is built we know which custom-component assemblies to reference.
+            // With none, this emits the same JSON (plus the configured rootNamespace), so behaviour is unchanged.
+            wroteAsmdef |= WriteIfChanged(AsmdefPath, BinderyCodeGen.EmitAsmdef(extraAsmRefs, namespaceName));
 
             if (!queued && !wroteAsmdef) return;
             AssetDatabase.Refresh();
@@ -277,6 +294,47 @@ namespace Bindery
             if (File.Exists(newPath) || File.Exists(legacyPath)) return;
             File.WriteAllText(newPath, BinderyCodeGen.EmitBehaviourStub(
                 model, BinderySettings.ScaffoldButtonHandlers, BinderySettings.ScaffoldControlHandlers));
+        }
+
+        // Assembly names already on the generated asmdef (or auto-referenced by Unity), so a member
+        // typed from one of these needs no extra reference. Custom [BinderyBind] components live
+        // OUTSIDE this set, and only they push a name into extraAsmRefs.
+        static readonly HashSet<string> AlreadyReferencedAsms = new HashSet<string>(System.StringComparer.Ordinal)
+        {
+            "Bindery.Runtime", "UnityEngine.UI", "Unity.TextMeshPro",
+            // Unity's auto-referenced predefined modules — RectTransform / CanvasGroup / etc. resolve here.
+            "UnityEngine", "UnityEngine.CoreModule", "mscorlib",
+        };
+
+        // Adds the defining assembly of every custom-bound ([BinderyBind]) member type in this model
+        // to <paramref name="acc"/>. A member's csharpType is resolved to a Type; built-in / uGUI / TMP
+        // / CanvasGroup types resolve to already-referenced assemblies and are skipped, so only custom
+        // components contribute. Unresolved types (not compiled yet) are skipped — picked up on regen.
+        static void CollectCustomAssemblies(ViewModel model, HashSet<string> acc)
+        {
+            foreach (var m in model.members)
+            {
+                if (m.isScope) continue;                                   // scopes are RectTransform
+                var t = ResolveType(m.csharpType);
+                if (t == null) continue;
+                string asm = t.Assembly.GetName().Name;
+                if (!AlreadyReferencedAsms.Contains(asm)) acc.Add(asm);
+            }
+        }
+
+        // Resolve a fully-qualified type name across the loaded assemblies (mirrors BinderyWire's
+        // resolver, kept local so the generator doesn't depend on its internals).
+        static System.Type ResolveType(string fullName)
+        {
+            if (string.IsNullOrEmpty(fullName)) return null;
+            var t = System.Type.GetType(fullName);
+            if (t != null) return t;
+            foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                t = asm.GetType(fullName);
+                if (t != null) return t;
+            }
+            return null;
         }
 
         static bool WriteIfChanged(string path, string content)

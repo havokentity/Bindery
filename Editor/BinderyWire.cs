@@ -40,10 +40,13 @@ namespace Bindery
         public static void Enqueue(ViewModel m)
         {
             var set = Load();
+            // Fully-qualified type name must use the SAME namespace the .g.cs was emitted with
+            // (BinderySettings.GeneratedNamespace, carried on the model) so ResolveType finds it.
+            var ns = string.IsNullOrEmpty(m.namespaceName) ? BinderyCodeGen.GeneratedNamespace : m.namespaceName;
             var pv = new PView
             {
                 rootGid = GidOf(m.root.gameObject),
-                typeName = BinderyCodeGen.GeneratedNamespace + "." + m.className,
+                typeName = ns + "." + m.className,
             };
             foreach (var mem in m.members)
                 pv.members.Add(new PMember { field = mem.FieldName, gid = GidOf(mem.node.gameObject), type = mem.csharpType });

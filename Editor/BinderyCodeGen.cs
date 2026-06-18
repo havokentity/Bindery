@@ -20,7 +20,15 @@ namespace Bindery
 {
     internal static class BinderyCodeGen
     {
+        // Default generated namespace / base class. The configured values ride on the ViewModel
+        // (BinderySettings.GeneratedNamespace / .BaseClass); these consts are the fallbacks used when
+        // a model leaves them unset and the canonical default the asmdef ships with.
         public const string GeneratedNamespace = "Bindery.Generated";
+        public const string DefaultBaseClass = "Bindery.BinderyView";
+
+        // The configured namespace / base class for a view, defaulting when the model didn't set them.
+        static string NamespaceOf(ViewModel v) => string.IsNullOrEmpty(v.namespaceName) ? GeneratedNamespace : v.namespaceName;
+        static string BaseClassOf(ViewModel v) => string.IsNullOrEmpty(v.baseClass) ? DefaultBaseClass : v.baseClass;
 
         // ---- <Name>View.g.cs ----------------------------------------------------------
         public static string EmitViewClass(ViewModel v)
@@ -31,24 +39,36 @@ namespace Bindery
             sb.AppendLine("//   public partial class " + v.className + " { protected override void OnBind() { } }");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine();
-            sb.AppendLine("namespace " + GeneratedNamespace);
+            sb.AppendLine("namespace " + NamespaceOf(v));
             sb.AppendLine("{");
-            sb.AppendLine("    public partial class " + v.className + " : Bindery.BinderyView");
+            sb.AppendLine("    public partial class " + v.className + " : " + BaseClassOf(v));
             sb.AppendLine("    {");
 
-            // Backing fields (flat on the view; nested scopes index back into these).
+            // Backing fields (flat on the view; nested scopes index back into these). Collected
+            // members keep their own [SerializeField] (still wired one-by-one); the lead of each
+            // group also gets a cached IReadOnlyList<T> field the collection accessor lazy-fills.
             foreach (var m in v.members)
             {
                 sb.AppendLine("        [SerializeField] " + m.csharpType + " " + m.FieldName + ";");
                 if (m.isScope)
                     sb.AppendLine("        " + m.scopeTypeName + " " + m.FieldName + "Scope;");
+                if (m.collectionLead)
+                    sb.AppendLine("        " + ReadOnlyListType(m.csharpType) + " " + CollectionField(m) + ";");
             }
             if (v.members.Count > 0) sb.AppendLine();
 
-            // Accessors exposed directly on the view (top-level children).
+            // Accessors exposed directly on the view (top-level children). A collected member's
+            // individual accessor is suppressed in favour of the group's collection accessor, which
+            // the lead element emits in element-index order.
             foreach (var m in v.members)
             {
                 if (!m.exposeOnRoot) continue;
+                if (m.IsCollected)
+                {
+                    if (m.collectionLead)
+                        sb.AppendLine(EmitCollectionAccessor(v, m, "        ", ""));
+                    continue;
+                }
                 if (m.isScope)
                     sb.AppendLine("        public " + m.scopeTypeName + " " + m.identifier
                                 + " => " + m.FieldName + "Scope ??= new " + m.scopeTypeName + "(this);");
@@ -70,6 +90,13 @@ namespace Bindery
                 foreach (var c in v.members)
                 {
                     if (c.parent != s.node) continue;
+                    if (c.IsCollected)
+                    {
+                        // Collection backing field lives flat on the view; the accessor surfaces here.
+                        if (c.collectionLead)
+                            sb.AppendLine(EmitCollectionAccessor(v, c, "            ", "_view."));
+                        continue;
+                    }
                     if (c.isScope)
                         sb.AppendLine("            public " + c.scopeTypeName + " " + c.identifier
                                     + " => _view." + c.FieldName + "Scope ??= new " + c.scopeTypeName + "(_view);");
@@ -84,6 +111,39 @@ namespace Bindery
             return sb.ToString();
         }
 
+        // ---- collection emit helpers --------------------------------------------------
+        // A collected group surfaces as one cached, read-only, ordered accessor:
+        //   public IReadOnlyList<Button> Slots => _Slots ??= new Button[] { _Slot0, _Slot1, _Slot2 };
+        // Elements are gathered from the group's members (lead + the rest) in parsed-index order.
+        // <paramref name="indent"/> sets the surrounding indent; <paramref name="fieldPrefix"/> is
+        // "" on the view body or "_view." inside a scope class (the fields are flat on the view).
+        static string EmitCollectionAccessor(ViewModel v, ViewMember lead, string indent, string fieldPrefix)
+        {
+            var group = new List<ViewMember>();
+            foreach (var m in v.members)
+                if (m.collectionName == lead.collectionName && m.parent == lead.parent && m.csharpType == lead.csharpType)
+                    group.Add(m);
+            group.Sort((a, b) => a.collectionIndex.CompareTo(b.collectionIndex));
+
+            var elems = new StringBuilder();
+            for (int i = 0; i < group.Count; i++)
+            {
+                if (i > 0) elems.Append(", ");
+                elems.Append(fieldPrefix).Append(group[i].FieldName);
+            }
+
+            string listType = ReadOnlyListType(lead.csharpType);
+            return indent + "public " + listType + " " + lead.collectionName
+                 + " => " + fieldPrefix + CollectionField(lead)
+                 + " ??= new " + lead.csharpType + "[] { " + elems + " };";
+        }
+
+        // The cached array field name for a group, e.g. "_Slots" (flat on the view, like backing fields).
+        static string CollectionField(ViewMember lead) => "_" + lead.collectionName;
+
+        static string ReadOnlyListType(string elementType)
+            => "System.Collections.Generic.IReadOnlyList<" + elementType + ">";
+
         // ---- <Name>View.cs (editable stub, written only if missing) -------------------
         // Optionally pre-wires each control's basic event to a named handler method (with its own
         // body) so the developer has somewhere to put behaviour. Written once, never regenerated.
@@ -97,6 +157,7 @@ namespace Bindery
             foreach (var m in v.members)
             {
                 if (m.isScope) continue;
+                if (m.IsCollected) continue;   // collection elements have no individual accessor to wire — iterate the collection (e.g. Slots) yourself
                 var ev = ControlEvent(m.csharpType);
                 if (ev == null) continue;                                  // graphics / sub-views: no event
                 bool isButton = m.csharpType == "UnityEngine.UI.Button";
@@ -115,7 +176,7 @@ namespace Bindery
             sb.AppendLine("// Your code for " + v.className + ". This file is NOT regenerated — safe to edit.");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine();
-            sb.AppendLine("namespace " + GeneratedNamespace);
+            sb.AppendLine("namespace " + NamespaceOf(v));
             sb.AppendLine("{");
             sb.AppendLine("    public partial class " + v.className);
             sb.AppendLine("    {");
@@ -177,18 +238,37 @@ namespace Bindery
         }
 
         // ---- Bindery.Generated.asmdef -------------------------------------------------
-        public static string EmitAsmdef()
+        // The built-in references every generated view needs. Custom-component views ([BinderyBind])
+        // add the assembly that defines the component on top — passed in via extraAssemblyRefs.
+        static readonly string[] BaseAsmdefRefs = { "Bindery.Runtime", "UnityEngine.UI", "Unity.TextMeshPro" };
+
+        /// <summary>Emit the Bindery.Generated asmdef JSON. The assembly NAME stays "Bindery.Generated"
+        /// (its identity — referenced by user asmdefs and the wiring); <paramref name="rootNamespace"/>
+        /// tracks the configured generated namespace. <paramref name="extraAssemblyRefs"/> are the
+        /// assemblies that define any [BinderyBind] custom components surfaced by the generated views;
+        /// they're merged after the built-ins and de-duped so a custom-component view actually compiles.
+        /// CAVEAT: an extra assembly must NOT reference Bindery.Generated back, or Unity rejects the
+        /// cyclic asmdef — keep [BinderyBind] components in their own leaf assembly (v1 limitation).</summary>
+        public static string EmitAsmdef(IEnumerable<string> extraAssemblyRefs = null, string rootNamespace = GeneratedNamespace)
         {
-            return "{\n"
-                 + "  \"name\": \"Bindery.Generated\",\n"
-                 + "  \"rootNamespace\": \"Bindery.Generated\",\n"
-                 + "  \"references\": [\n"
-                 + "    \"Bindery.Runtime\",\n"
-                 + "    \"UnityEngine.UI\",\n"
-                 + "    \"Unity.TextMeshPro\"\n"
-                 + "  ],\n"
-                 + "  \"autoReferenced\": true\n"
-                 + "}\n";
+            // Built-ins first, then extras in first-seen order, skipping blanks/dupes.
+            var refs = new List<string>(BaseAsmdefRefs);
+            var seen = new HashSet<string>(refs);
+            if (extraAssemblyRefs != null)
+                foreach (var r in extraAssemblyRefs)
+                    if (!string.IsNullOrEmpty(r) && seen.Add(r)) refs.Add(r);
+
+            var sb = new StringBuilder();
+            sb.Append("{\n");
+            sb.Append("  \"name\": \"Bindery.Generated\",\n");
+            sb.Append("  \"rootNamespace\": \"").Append(string.IsNullOrEmpty(rootNamespace) ? GeneratedNamespace : rootNamespace).Append("\",\n");
+            sb.Append("  \"references\": [\n");
+            for (int i = 0; i < refs.Count; i++)
+                sb.Append("    \"").Append(refs[i]).Append(i < refs.Count - 1 ? "\",\n" : "\"\n");
+            sb.Append("  ],\n");
+            sb.Append("  \"autoReferenced\": true\n");
+            sb.Append("}\n");
+            return sb.ToString();
         }
     }
 }

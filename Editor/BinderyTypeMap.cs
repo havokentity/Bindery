@@ -8,10 +8,13 @@
 //   • A GRAPHIC is a leaf too, UNLESS it nests bindable children (then the reader
 //     promotes it to a container scope).
 //
-// Only Unity's built-in uGUI + TextMeshPro types are recognised — that is the
-// whole supported surface, and it works with no configuration.
+// Unity's built-in uGUI + TextMeshPro types are recognised with no configuration,
+// plus a CanvasGroup (surfaced as a display/behaviour leaf). Beyond those, any
+// MonoBehaviour you mark with [Bindery.BinderyBind] is surfaced as a typed control
+// leaf — the one extension point for your own components.
 // =============================================================================
 
+using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -48,6 +51,26 @@ namespace Bindery
             if (Has<Text>(go, "UnityEngine.UI.Text", ref csharpType)) return BindKind.Graphic;
             if (Has<RawImage>(go, "UnityEngine.UI.RawImage", ref csharpType)) return BindKind.Graphic;
             if (Has<Image>(go, "UnityEngine.UI.Image", ref csharpType)) return BindKind.Graphic;
+
+            // A CanvasGroup is a display/behaviour element — treat it as a graphic leaf so you can
+            // drive alpha/interactable through a typed accessor. Like an Image-container, a
+            // CanvasGroup on a node that ALSO nests bindable children is absorbed into the scope
+            // the reader promotes for that node (the CanvasGroup isn't separately surfaced) — an
+            // accepted v1 limitation.
+            if (Has<CanvasGroup>(go, "UnityEngine.CanvasGroup", ref csharpType)) return BindKind.Graphic;
+
+            // ---- custom components ([Bindery.BinderyBind]) → typed control leaves ---
+            // Your own MonoBehaviour, marked with [BinderyBind], is surfaced like a control:
+            // a typed leaf we never descend into. Scan components deterministically and take
+            // the first marked one (inherited attribute counts).
+            foreach (var comp in go.GetComponents<MonoBehaviour>())
+            {
+                if (comp == null) continue;                                // missing script
+                var t = comp.GetType();
+                if (t.GetCustomAttribute<BinderyBindAttribute>(inherit: true) == null) continue;
+                csharpType = t.FullName;
+                return BindKind.Control;
+            }
 
             return BindKind.None;
         }

@@ -9,6 +9,8 @@
 ![Editor](https://img.shields.io/badge/Editor-tool-8B5CF6?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
+![CI](https://github.com/havokentity/Bindery/actions/workflows/validate.yml/badge.svg)
+
 </div>
 
 ---
@@ -17,9 +19,10 @@ Bindery is a tiny Unity **Editor** tool. Right-click any GameObject or Canvas in
 the Hierarchy, hit **Generate Accessor Class**, and Bindery walks that subtree and
 writes you a strongly-typed `partial class` component whose properties point at the
 real built-in uGUI controls underneath — `Button`, `Toggle`, `Slider`, `Dropdown`,
-`InputField`, `ScrollRect`, `Image`, `RawImage`, `Text`, and `TMP_Text`. It then
-**attaches that component to the object and wires every reference for you**, so the
-view is ready in the Inspector with nothing left to drag.
+`InputField`, `ScrollRect`, `Image`, `RawImage`, `Text`, `TMP_Text`, `CanvasGroup` — and
+**your own components** marked `[BinderyBind]`. It then **attaches that component to the
+object and wires every reference for you**, so the view is ready in the Inspector with
+nothing left to drag.
 
 No reflection at runtime. No string-keyed `Find`. Every accessor is a plain field
 read against a `[SerializeField]` reference resolved at edit time.
@@ -102,6 +105,10 @@ view.Footer.OkButton.onClick.AddListener(Apply);   // nested container → neste
   `~ButtonRow` gives you `view.OkButton`, not `view.ButtonRow.OkButton`. (On a leaf it
   just means "skip this one.") The prefix is configurable — see *Settings*.
 - **TextMeshPro is surfaced as `TMP_Text`** so the accessor works for any TMP text.
+- **Your own components bind too.** Mark a MonoBehaviour with `[Bindery.BinderyBind]` and it's
+  surfaced as a typed leaf — `CanvasGroup` is recognized out of the box. See *Custom components*.
+- **Repeated siblings collapse into a collection.** `Slot0, Slot1, Slot2` (same type, shared stem +
+  index) become one ordered `view.Slots` (`IReadOnlyList<Button>`) instead of three accessors.
 - **Names become C# identifiers**, casing preserved; collisions — with each other *or* with a
   base-class member (`transform`, `IsVisible`, `Awake`, …) — get `_2` / `_3` suffixes (with a
   console warning), so generation never shadows a base member or fails to compile.
@@ -184,6 +191,25 @@ stops referencing the deleted type (the subtree falls back to a normal scope).
 
 A generated view's **inspector** also carries **Regenerate** and **Remove View** buttons and warns
 when a wired reference has gone missing — so the whole loop is reachable without the menus.
+**`Tools ▸ Bindery ▸ Validate Views in Scene`** scans every view (including inactive) and logs a
+clickable warning for any with missing references.
+
+## Custom components
+
+Built-in uGUI isn't the whole story. Mark any of your own MonoBehaviours with `[BinderyBind]` and
+Bindery surfaces it as a strongly-typed leaf:
+
+```csharp
+[Bindery.BinderyBind]
+public class HealthBar : MonoBehaviour { /* … */ }
+
+// →  view.PlayerHealth   is a typed HealthBar
+```
+
+Bindery automatically adds the assembly that defines the component to the generated
+`Bindery.Generated.asmdef` so the view compiles. **Caveat:** that assembly must *not* reference
+`Bindery.Generated` back (Unity rejects the cyclic asmdef) — keep `[BinderyBind]` components in
+their own leaf assembly. `CanvasGroup` is recognized without any attribute.
 
 ## Settings
 
@@ -225,6 +251,11 @@ across the two files); a value outside that falls back to the default.
 handler scaffolding in a freshly generated stub: *Scaffold button click handlers* and *Scaffold
 control event handlers*. Turn them off if you'd rather start from an empty `OnBind()`.
 
+**Project Settings ▸ Bindery ▸ Generated output** — the **generated namespace** (default
+`Bindery.Generated`) and the **view base class** (default `Bindery.BinderyView`) that views derive
+from. Both are sanitized to legal dotted C# names and applied across the `.g.cs`, the stub, the
+asmdef `rootNamespace`, and wiring. The base class must still derive from `Bindery.BinderyView`.
+
 ## Install
 
 Unity **2022.3+**, with **uGUI** and **TextMeshPro** present.
@@ -241,6 +272,12 @@ the Package Manager if your project doesn't already have it.
 Generated output lands under `Assets/Bindery/` — the regenerated `.g.cs` in `Generated/`,
 your editable stubs in `Views/` — both under one `Bindery.Generated` assembly definition
 (at `Assets/Bindery/`), referenceable from your own asmdefs.
+
+## Sample
+
+Import **Accessor View Demo** from *Package Manager ▸ Bindery ▸ Samples*, then run
+**Tools ▸ Bindery ▸ Samples ▸ Build Accessor View Demo** to drop a ready-made `SettingsPanel`
+hierarchy into the active scene — one menu click from a live generated view.
 
 ## Notes & limits (v1)
 

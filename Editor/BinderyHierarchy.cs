@@ -35,6 +35,15 @@ namespace Bindery
         public string scopeTypeName;  // nested class name when isScope (e.g. "FooterScope")
         public bool exposeOnRoot;     // parent == root → accessor lives directly on the view
 
+        // Collections: sibling members sharing a stem + trailing index (e.g. Slot0, Slot1) are
+        // grouped into ONE ordered, read-only accessor. The per-element backing fields stay (and
+        // wire normally); only the individual accessor is dropped in favour of the collection.
+        public string collectionName;     // null = not collected; else the accessor name (e.g. "Slots")
+        public int collectionIndex;       // parsed trailing index, for ordering elements within the group
+        public bool collectionLead;       // true on the first element (sorted) — where the accessor is emitted
+
+        public bool IsCollected => collectionName != null;
+
         /// <summary>Backing-field stem; drops any @ escape: `@class` → key "class", field "_class".</summary>
         public string Key => (identifier ?? "").TrimStart('@');
         public string FieldName => "_" + Key;
@@ -44,6 +53,8 @@ namespace Bindery
     internal struct ViewModel
     {
         public string className;      // "<RootName>View"
+        public string namespaceName;  // the configured generated namespace (e.g. "Bindery.Generated")
+        public string baseClass;      // fully-qualified base type (e.g. "Bindery.BinderyView")
         public Transform root;        // the selected GameObject's transform
         public List<ViewMember> members;
     }
@@ -101,6 +112,7 @@ namespace Bindery
                 collected[i] = m;
             }
             AssignScopeTypeNames(collected);
+            DetectCollections(collected, className);
 
             return new ViewModel { className = className, root = rootT, members = collected };
         }
@@ -236,6 +248,117 @@ namespace Bindery
                 m.scopeTypeName = typeName;
                 members[i] = m;
             }
+        }
+
+        // ---- collections --------------------------------------------------------------
+        // Repeated siblings of the SAME kind whose identifiers share a stem + a trailing index —
+        // "Slot0/Slot1/Slot2", "Slot 0/Slot 1", "Item (1)/Item (2)" — collapse into ONE ordered,
+        // read-only accessor named after the stem (pluralised). The per-element members survive
+        // (their backing fields still wire individually); we only suppress their single accessors.
+        //
+        // Grouping rules:
+        //   • same effective parent (so scopes are respected), identical csharpType, leaf members
+        //     only (no scopes / sub-views excluded — controls + graphics are fair game),
+        //   • identifier = <stem><index> after stripping a trailing run of digits; stem must be
+        //     non-empty and shared, 2+ members required,
+        //   • elements ordered by parsed index (non-contiguous indices like 0,2 still group — just
+        //     ordered, with no gap-filling),
+        //   • the collection accessor name (stem pluralised) must not collide with an existing
+        //     member identifier or a reserved name; if it would, the group is left ungrouped.
+        static void DetectCollections(List<ViewMember> members, string className)
+        {
+            // Names already taken by members or the base class — a collection accessor must dodge them.
+            var taken = new HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var m in members) taken.Add(m.Key);
+            foreach (var r in ReservedNames) taken.Add(r);
+
+            // Bucket candidate leaves by (effective parent, csharpType, stem). LinkedHashmap-style:
+            // a list of buckets in first-seen order so generated output is stable.
+            var keys = new List<(Transform parent, string type, string stem)>();
+            var groups = new Dictionary<(Transform, string, string), List<int>>();
+
+            for (int i = 0; i < members.Count; i++)
+            {
+                var m = members[i];
+                if (m.isScope) continue;                                   // scopes never collect
+                if (!SplitTrailingIndex(m.Key, out var stem, out _)) continue;  // no trailing index
+                if (stem.Length == 0) continue;                            // pure-digit name → no stem
+
+                var key = (m.parent, m.csharpType, stem);
+                if (!groups.TryGetValue(key, out var list)) { list = new List<int>(); groups[key] = list; keys.Add(key); }
+                list.Add(i);
+            }
+
+            foreach (var key in keys)
+            {
+                var idxs = groups[key];
+                if (idxs.Count < 2) continue;                              // a lone Slot0 stays a single member
+
+                string accessor = Pluralize(key.Item3);
+                if (taken.Contains(accessor))
+                {
+                    Debug.LogWarning($"[Bindery] {className}: collection '{accessor}' (from '{key.Item3}*') " +
+                        "collides with an existing accessor — left as individual members.");
+                    continue;
+                }
+                taken.Add(accessor);
+
+                // Order the group's members by their parsed trailing index; first becomes the lead.
+                idxs.Sort((a, b) =>
+                {
+                    SplitTrailingIndex(members[a].Key, out _, out int ia);
+                    SplitTrailingIndex(members[b].Key, out _, out int ib);
+                    return ia.CompareTo(ib);
+                });
+
+                for (int n = 0; n < idxs.Count; n++)
+                {
+                    var m = members[idxs[n]];
+                    SplitTrailingIndex(m.Key, out _, out int parsed);
+                    m.collectionName = accessor;
+                    m.collectionIndex = parsed;
+                    m.collectionLead = n == 0;
+                    members[idxs[n]] = m;
+                }
+            }
+        }
+
+        // Splits a trailing run of digits off an identifier: "Slot12" → ("Slot", 12). Surrounding
+        // separators a name-to-identifier pass would have dropped ("Slot 3"→"Slot3", "Item (1)"→
+        // "Item1") are already gone, so this sees a clean <letters><digits> form. Returns false when
+        // there is no trailing digit. The stem keeps a trailing '_' if present ("Slot_3"→"Slot_").
+        static bool SplitTrailingIndex(string id, out string stem, out int index)
+        {
+            stem = id; index = 0;
+            if (string.IsNullOrEmpty(id) || !char.IsDigit(id[id.Length - 1])) return false;
+
+            int cut = id.Length;
+            while (cut > 0 && char.IsDigit(id[cut - 1])) cut--;
+            stem = id.Substring(0, cut);
+            // int.Parse is safe: the run is all ASCII digits. Clamp absurdly long runs defensively.
+            var digits = id.Substring(cut);
+            if (digits.Length > 9) digits = digits.Substring(digits.Length - 9);
+            index = int.Parse(digits);
+            return true;
+        }
+
+        // The collection accessor name: the stem, naively pluralised. "Slot"→"Slots", "Entry"→
+        // "Entries", "Box"→"Boxes". A stem ending in '_' (from "Slot_3") keeps it: "Slot_"→"Slot_s".
+        static string Pluralize(string stem)
+        {
+            if (stem.Length == 0) return stem;
+            char last = stem[stem.Length - 1];
+            if (stem.Length >= 2 && (last == 'y' || last == 'Y'))
+            {
+                char prev = stem[stem.Length - 2];
+                bool prevVowel = "aeiouAEIOU".IndexOf(prev) >= 0;
+                if (!prevVowel) return stem.Substring(0, stem.Length - 1) + (char.IsUpper(last) ? "IES" : "ies");
+            }
+            if (last == 's' || last == 'x' || last == 'z' ||
+                stem.EndsWith("ch", System.StringComparison.OrdinalIgnoreCase) ||
+                stem.EndsWith("sh", System.StringComparison.OrdinalIgnoreCase))
+                return stem + (char.IsUpper(last) ? "ES" : "es");
+            return stem + "s";
         }
 
         static string RelativePath(Transform root, Transform node)

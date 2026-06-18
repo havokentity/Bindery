@@ -26,10 +26,14 @@ namespace Bindery
         public const string DefaultSuffix = "View";
         public const string DefaultTransparentPrefix = "~";
         public const string DefaultViewsFolder = "Bindery/Views";
+        public const string DefaultNamespace = "Bindery.Generated";
+        public const string DefaultBaseClass = "Bindery.BinderyView";
 
         [SerializeField] string classSuffix = DefaultSuffix;
         [SerializeField] string transparentPrefix = DefaultTransparentPrefix;
         [SerializeField] string viewsFolder = DefaultViewsFolder;
+        [SerializeField] string generatedNamespace = DefaultNamespace;
+        [SerializeField] string baseClass = DefaultBaseClass;
         [SerializeField] bool scaffoldButtonHandlers = true;
         [SerializeField] bool scaffoldControlHandlers = true;
 
@@ -79,6 +83,17 @@ namespace Bindery
             }
         }
 
+        /// <summary>Namespace the generated views are emitted into — the <c>.g.cs</c> + stub
+        /// <c>namespace</c> line and the asmdef's <c>rootNamespace</c>. Sanitized to a legal dotted
+        /// C# namespace (falls back to "Bindery.Generated" if empty/garbage).</summary>
+        public static string GeneratedNamespace => SanitizeDotted(Instance.generatedNamespace, DefaultNamespace);
+
+        /// <summary>Fully-qualified base class the generated view derives from
+        /// (<c>public partial class FooView : &lt;BaseClass&gt;</c>). Sanitized to a legal dotted C#
+        /// type name (falls back to "Bindery.BinderyView" if empty/garbage). The chosen type MUST
+        /// derive from <c>Bindery.BinderyView</c> for wiring to work — not verified at generate time.</summary>
+        public static string BaseClass => SanitizeDotted(Instance.baseClass, DefaultBaseClass);
+
         /// <summary>When generating a new view stub, pre-wire each Button's onClick to a named handler
         /// method (with its own body). On by default.</summary>
         public static bool ScaffoldButtonHandlers => Instance.scaffoldButtonHandlers;
@@ -97,6 +112,27 @@ namespace Bindery
                 if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
                     sb.Append(c);
             return sb.Length == 0 ? fallback : sb.ToString();
+        }
+
+        // A legal dotted C# name (namespace or type): one or more identifier-legal segments joined by
+        // '.'. Each segment is sanitized like a single identifier and must not begin with a digit (so a
+        // leading-digit segment gets an '_' prefix). Empty segments (".." / leading/trailing '.') are
+        // dropped; if nothing legal survives, fall back to the default.
+        public static string SanitizeDotted(string raw, string fallback)
+        {
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            var segments = new List<string>();
+            foreach (var part in raw.Split('.'))
+            {
+                var sb = new StringBuilder(part.Length);
+                foreach (char c in part)
+                    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
+                        sb.Append(c);
+                if (sb.Length == 0) continue;                       // drop empty / all-illegal segments
+                if (sb[0] >= '0' && sb[0] <= '9') sb.Insert(0, '_'); // a segment can't start with a digit
+                segments.Add(sb.ToString());
+            }
+            return segments.Count == 0 ? fallback : string.Join(".", segments);
         }
 
         [SettingsProvider]
@@ -174,6 +210,54 @@ namespace Bindery
                     }
 
                     EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Generated output", EditorStyles.boldLabel);
+
+                    EditorGUI.BeginChangeCheck();
+                    string nextNs = EditorGUILayout.DelayedTextField(
+                        new GUIContent("Generated namespace",
+                            "Namespace the generated views live in — the .g.cs + stub namespace and the " +
+                            "asmdef rootNamespace. Sanitized to a legal dotted C# namespace. " +
+                            "Default \"Bindery.Generated\"."),
+                        s.generatedNamespace);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.generatedNamespace = nextNs;
+                        Save();
+                    }
+
+                    EditorGUILayout.LabelField(" ", "Preview:  namespace " + SanitizeDotted(nextNs, DefaultNamespace));
+
+                    if (GUILayout.Button("Reset to default (\"Bindery.Generated\")", GUILayout.Width(280)))
+                    {
+                        s.generatedNamespace = DefaultNamespace;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
+
+                    EditorGUI.BeginChangeCheck();
+                    string nextBase = EditorGUILayout.DelayedTextField(
+                        new GUIContent("View base class",
+                            "Fully-qualified base class each generated view derives from. Sanitized to a " +
+                            "legal dotted C# type name. MUST derive from Bindery.BinderyView for wiring to " +
+                            "work. Default \"Bindery.BinderyView\"."),
+                        s.baseClass);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.baseClass = nextBase;
+                        Save();
+                    }
+
+                    EditorGUILayout.LabelField(" ", "Preview:  class SettingsPanel" + Sanitize(next, DefaultSuffix)
+                        + " : " + SanitizeDotted(nextBase, DefaultBaseClass));
+
+                    if (GUILayout.Button("Reset to default (\"Bindery.BinderyView\")", GUILayout.Width(280)))
+                    {
+                        s.baseClass = DefaultBaseClass;
+                        Save();
+                    }
+
+                    EditorGUILayout.Space();
                     EditorGUILayout.LabelField("New view stubs", EditorStyles.boldLabel);
 
                     EditorGUI.BeginChangeCheck();
@@ -201,7 +285,7 @@ namespace Bindery
 
                     EditorGUI.indentLevel--;
                 },
-                keywords = new HashSet<string>(new[] { "Bindery", "suffix", "class", "view", "accessor", "codegen" }),
+                keywords = new HashSet<string>(new[] { "Bindery", "suffix", "class", "view", "accessor", "codegen", "namespace", "base" }),
             };
         }
     }
