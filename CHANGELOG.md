@@ -2,6 +2,18 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.11.0] — 2026-06-18
+
+- **Bindery Views window.** `Window ▸ Bindery ▸ Views` opens one panel listing every generated view
+  in the project — across the open scene(s) **and** prefab assets — with a status dot (green / amber)
+  and missing-reference count per view, plus **Select / Regen / Remove** per row and **Regenerate
+  All / Validate / Refresh** on the toolbar. Handy for managing views scattered across a larger
+  project.
+- **Remove works on prefab-asset views.** Removing a view that lives in a prefab asset now detaches
+  the component through the prefab's loaded contents and re-saves the asset (instead of leaving a
+  missing-script behind), so the window's **Remove** — and the menu / inspector remove — all clean
+  up prefab views correctly.
+
 ## [0.10.0] — 2026-06-18
 
 - **Generate on prefab assets.** Select a prefab in the Project window and **Generate Accessor

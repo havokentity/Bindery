@@ -195,13 +195,31 @@ stops referencing the deleted type (the subtree falls back to a normal scope).
 If there are views **nested below** what you're removing, the confirmation offers **Remove all**
 (the selected view plus every nested one) / **Selected only** / **Cancel** — so you can clear a
 whole panel's worth of views in one go. Remove also works on a view-less parent that just has
-nested views.
+nested views, and on a view that lives in a **prefab asset** — the component is detached from the
+prefab's contents and the asset is re-saved, leaving no missing-script behind.
 
 A generated view's **inspector** also carries **Regenerate** and **Remove View** buttons and warns
 when a wired reference has gone missing — so the whole loop is reachable without the menus.
 **`Tools ▸ Bindery ▸ Validate Views in Scene`** scans every view (including inactive) and logs a
 clickable warning for any with missing references. **`Tools ▸ Bindery ▸ Regenerate All Views`**
 re-runs generation on every view in the open scene(s) — handy after changing a setting.
+
+## The Bindery Views window
+
+**`Window ▸ Bindery ▸ Views`** opens one panel listing every generated view across the project —
+those in the open scene(s) **and** those baked into prefab assets. Each row shows the view's class
+name, where it lives, a status dot (green when fully wired, amber when one or more references have
+gone missing) with the missing-reference count, and three buttons:
+
+- **Select** — pings and selects the object (or the prefab asset) in the project.
+- **Regen** — regenerates that single view in place.
+- **Remove** — detaches the view and deletes its class files. Works on **prefab-asset** views too:
+  the component is removed from the prefab via its loaded contents and the asset is saved, so no
+  missing-script is left behind.
+
+The toolbar adds **Regenerate All** and **Validate** for the whole set, and **Refresh** to re-scan
+(scanning every prefab isn't free, so the list refreshes on open, on focus, and on demand). Handy on
+larger projects where views are scattered across scenes and prefabs.
 
 ## Custom components
 

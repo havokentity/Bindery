@@ -272,13 +272,18 @@ namespace Bindery
                         regen.Add(anc);
 
             // 1) Detach the components (no Undo — the class files go too, so a half-undo would only
-            //    resurrect a missing-script component).
+            //    resurrect a missing-script component). Prefab-asset views are detached via prefab contents.
             foreach (var t in targets)
             {
-                var comp = t.go.GetComponent<BinderyView>();
-                if (comp != null) UnityEngine.Object.DestroyImmediate(comp);
-                if (!Application.isPlaying && t.go.scene.IsValid())
-                    EditorSceneManager.MarkSceneDirty(t.go.scene);
+                if (!t.go.scene.IsValid() && PrefabUtility.IsPartOfPrefabAsset(t.go))
+                    RemoveViewFromPrefab(AssetDatabase.GetAssetPath(t.go), t.cls);
+                else
+                {
+                    var comp = t.go.GetComponent<BinderyView>();
+                    if (comp != null) UnityEngine.Object.DestroyImmediate(comp);
+                    if (!Application.isPlaying && t.go.scene.IsValid())
+                        EditorSceneManager.MarkSceneDirty(t.go.scene);
+                }
                 Debug.Log($"[Bindery] Removed view {t.cls} from '{t.go.name}'.", t.go);
             }
 
@@ -300,6 +305,21 @@ namespace Bindery
         static void DeleteAssetIfExists(string path)
         {
             if (File.Exists(path)) AssetDatabase.DeleteAsset(path);
+        }
+
+        // Detach a generated view from a prefab ASSET: edit a loaded copy of its contents, destroy the
+        // matching view component(s), and save back.
+        static void RemoveViewFromPrefab(string prefabPath, string className)
+        {
+            var root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                foreach (var bv in root.GetComponentsInChildren<BinderyView>(true))
+                    if (bv != null && bv.GetType().Name == className)
+                        UnityEngine.Object.DestroyImmediate(bv, true);
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
         }
 
         // Adds a generation root to the worklist (deduped), applying the scene + control-root guards.
