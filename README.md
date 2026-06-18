@@ -285,9 +285,13 @@ missing-reference count, and three buttons:
   the component is removed from the prefab via its loaded contents and the asset is saved, so no
   missing-script is left behind.
 
-The toolbar adds **Regenerate All** and **Validate** for the whole set, **Refresh** to re-scan, and
-(when there's nesting) **Expand** / **Collapse** for the tree. The list refreshes on open, on focus,
-and on demand — handy on larger projects where views are scattered across scenes and prefabs.
+Across the top is a **Bindery Tools** frame — the whole `Tools ▸ Bindery` toolset, one click away:
+**Generate ▸ Selection** and **Remove ▸ Selection** (act on the current Hierarchy/Project selection),
+**Regenerate All**, **Validate Scene**, and **Visual Script** (when Visual Scripting is installed).
+It's shown even with no views yet, so you can generate the first one straight from the window. The
+thin strip above it holds **Refresh**, the view count, **Expand** / **Collapse** (when there's
+nesting), and **Settings** (jumps to *Project Settings ▸ Bindery*). The list refreshes on open, on
+focus, and on demand — handy on larger projects where views are scattered across scenes and prefabs.
 
 ## Visual Scripting playground
 

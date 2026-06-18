@@ -2,6 +2,14 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.16.0] — 2026-06-18
+
+- **Bindery Tools frame in the window.** The Bindery Views window now has a grouped **Bindery Tools**
+  frame across the top — the whole `Tools ▸ Bindery` toolset one click away: **Generate ▸ Selection**,
+  **Remove ▸ Selection**, **Regenerate All**, **Validate Scene**, and **Visual Script** (when
+  installed), plus a **Settings** shortcut on the toolbar. Shown even with no views, so you can
+  generate the first one without leaving the window.
+
 ## [0.15.0] — 2026-06-18
 
 - **Bindery Views window is now a nested tree.** The panel lists views as a tree that mirrors

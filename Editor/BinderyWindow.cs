@@ -162,6 +162,24 @@ namespace Bindery
 
         void OnGUI()
         {
+            DrawToolbar();
+            DrawToolsFrame();
+
+            if (_total == 0)
+            {
+                EditorGUILayout.HelpBox("No Bindery views found in the open scene(s) or prefab assets. " +
+                    "Select a GameObject and use Generate ▸ Selection above, then Refresh.", MessageType.Info);
+                return;
+            }
+
+            _scroll = EditorGUILayout.BeginScrollView(_scroll);
+            foreach (var n in _roots) DrawNode(n);
+            EditorGUILayout.EndScrollView();
+        }
+
+        // Thin top strip: list controls only (the project-wide actions live in the Tools frame below).
+        void DrawToolbar()
+        {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60))) Rescan();
@@ -169,29 +187,52 @@ namespace Bindery
                 if (_hasNesting)
                 {
                     if (GUILayout.Button("Expand", EditorStyles.toolbarButton, GUILayout.Width(56))) _collapsed.Clear();
-                    if (GUILayout.Button("Collapse", EditorStyles.toolbarButton, GUILayout.Width(62))) CollapseAll();
+                    if (GUILayout.Button("Collapse", EditorStyles.toolbarButton, GUILayout.Width(64))) CollapseAll();
                 }
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Regenerate All", EditorStyles.toolbarButton))
-                    Defer(() => { EditorApplication.ExecuteMenuItem("Tools/Bindery/Regenerate All Views"); Rescan(); });
-                if (GUILayout.Button("Validate", EditorStyles.toolbarButton))
-                    EditorApplication.ExecuteMenuItem("Tools/Bindery/Validate Views in Scene");
-                // Only when the optional Visual Scripting integration is installed (detected by reflection
-                // so Bindery.Editor never references Visual Scripting itself).
-                if (VisualScriptingAvailable &&
-                    GUILayout.Button(new GUIContent("Visual Script", "Generate a Visual Scripting playground graph for these views"), EditorStyles.toolbarButton))
-                    Defer(() => EditorApplication.ExecuteMenuItem("Tools/Bindery/Generate Visual Script Playground"));
+                if (GUILayout.Button(new GUIContent("Settings", "Open Project Settings ▸ Bindery"),
+                    EditorStyles.toolbarButton, GUILayout.Width(64)))
+                    SettingsService.OpenProjectSettings("Project/Bindery");
             }
+        }
 
-            if (_total == 0)
+        // The Tools ▸ Bindery menu, grouped into one frame so the whole toolset is reachable from the
+        // window. Shown even with no views, so you can Generate from the current selection right here.
+        void DrawToolsFrame()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.HelpBox("No Bindery views found in the open scene(s) or prefab assets. Generate some, then Refresh.", MessageType.Info);
-                return;
-            }
+                EditorGUILayout.LabelField("Bindery Tools", EditorStyles.boldLabel);
 
-            _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            foreach (var n in _roots) DrawNode(n);
-            EditorGUILayout.EndScrollView();
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    using (new EditorGUI.DisabledScope(Selection.activeGameObject == null))
+                    {
+                        if (GUILayout.Button(new GUIContent("Generate ▸ Selection",
+                                "Generate accessor view(s) for the selected GameObject(s)")))
+                            Defer(() => { BinderyGenerator.Generate(Selection.gameObjects); Rescan(); });
+                        if (GUILayout.Button(new GUIContent("Remove ▸ Selection",
+                                "Remove the Bindery view(s) on the selection (and optionally nested ones)")))
+                            Defer(() => { BinderyGenerator.RemoveView(Selection.gameObjects); Rescan(); });
+                    }
+                    if (GUILayout.Button(new GUIContent("Regenerate All",
+                            "Regenerate every view in the open scene(s)")))
+                        Defer(() => { EditorApplication.ExecuteMenuItem("Tools/Bindery/Regenerate All Views"); Rescan(); });
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button(new GUIContent("Validate Scene",
+                            "Log any views in the open scene(s) with missing references")))
+                        EditorApplication.ExecuteMenuItem("Tools/Bindery/Validate Views in Scene");
+                    // Only when the optional Visual Scripting integration is installed (detected by
+                    // reflection so Bindery.Editor never references Visual Scripting itself).
+                    if (VisualScriptingAvailable &&
+                        GUILayout.Button(new GUIContent("Visual Script",
+                            "Generate a Visual Scripting playground graph for these views")))
+                        Defer(() => EditorApplication.ExecuteMenuItem("Tools/Bindery/Generate Visual Script Playground"));
+                }
+            }
         }
 
         void DrawNode(Node n)
