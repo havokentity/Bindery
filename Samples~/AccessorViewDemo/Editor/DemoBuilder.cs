@@ -41,7 +41,7 @@ namespace Bindery.Samples
             // ----------------------------------------------------------------
             // EventSystem — only one per scene; skip if one already exists.
             // ----------------------------------------------------------------
-            if (Object.FindObjectOfType<EventSystem>() == null)
+            if (Object.FindFirstObjectByType<EventSystem>() == null)
             {
                 var esGo = new GameObject("EventSystem",
                     typeof(EventSystem),

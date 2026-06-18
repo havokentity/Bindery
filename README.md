@@ -24,8 +24,8 @@ real built-in uGUI controls underneath — `Button`, `Toggle`, `Slider`, `Dropdo
 object and wires every reference for you**, so the view is ready in the Inspector with
 nothing left to drag.
 
-No reflection at runtime. No string-keyed `Find`. Every accessor is a plain field
-read against a `[SerializeField]` reference resolved at edit time.
+No reflection at runtime. No string-keyed `Find` — each accessor returns a `[SerializeField]`
+reference wired at edit time (and binds the view on first touch, so it works even on inactive views).
 
 > [!TIP]
 > ### ⚡ The whole loop
@@ -37,6 +37,18 @@ read against a `[SerializeField]` reference resolved at edit time.
 > ```
 
 ---
+
+**Compatibility:** verified on **Unity 2022.3 LTS** and **Unity 6** (6000.x). Depends only on uGUI;
+TextMeshPro is surfaced when present.
+
+### Contents
+
+- [What you get](#what-you-get) · [The rules it follows](#the-rules-it-follows)
+- [Add your own behaviour](#add-your-own-behaviour) ([binding is lazy](#binding-is-lazy--inactive-views-included)) · [Composing views](#composing-views)
+- [One registry for your top-level views](#one-registry-for-your-top-level-views) · [Removing a view](#removing-a-view)
+- [The Bindery Views window](#the-bindery-views-window) · [Visual Scripting playground](#visual-scripting-playground)
+- [Custom components](#custom-components) · [Settings](#settings)
+- [Install](#install) · [Sample](#sample) · [Notes &amp; limits](#notes--limits-v1)
 
 ## What you get
 
@@ -402,6 +414,11 @@ asmdef `rootNamespace`, and wiring. The base class must still derive from `Binde
 default). A collection serializes as one `T[]` field, shown as a **list in the Inspector**, instead
 of an individual `[SerializeField]` per element. Turn it off to get the per-element fields back.
 
+**Project Settings ▸ Bindery ▸ View registry** — *Generate the BinderyViews registry* (on by
+default). The master switch for the [`BinderyViews`](#one-registry-for-your-top-level-views) class;
+off deletes it on the next reload. Which views appear in it is opt-in **per view** via the checkbox
+in the Bindery Views window (default off, on for views on a `Canvas`).
+
 ## Install
 
 Unity **2022.3+**, with **uGUI** and **TextMeshPro** present.
@@ -433,6 +450,10 @@ hierarchy into the active scene — one menu click from a live generated view.
 - A container that is itself an `Image` (e.g. a card panel) is bound as a
   `RectTransform` scope; its own `Image` is not surfaced separately.
 - `ScrollRect` is a leaf — bind its `Content` object directly if you need its items.
+- The **clean rename-swap** (rename the view's GameObject → old view removed, stub migrated) is for
+  **scene objects**; renaming a view inside a **prefab asset** still just warns about the stale view.
+- A `[BinderyBind]` component's assembly must not reference `Bindery.Generated` back — keep such
+  components in their own leaf assembly (Unity rejects a cyclic asmdef otherwise).
 
 ## License
 

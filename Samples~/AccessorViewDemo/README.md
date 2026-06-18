@@ -44,19 +44,30 @@ finishes, so you can run Bindery immediately without clicking around.
 
    ```csharp
    var view = GetComponent<SettingsPanelView>();
-   view.EnsureBound();
-   view.Title.text = "Settings";
+   view.Title.text = "Settings";                       // touching an accessor binds the view
    view.VolumeSlider.value = 0.8f;
    view.Footer.OkButton.onClick.AddListener(Apply);
    ```
 
+## Things to try next
+
+- **Open the panel** — `Window ▸ Bindery ▸ Views` lists every generated view as a
+  tree, with per-view Select / Regenerate / Remove and a checkbox to expose a view
+  in the `BinderyViews` registry. `SettingsPanel` is a plain child of the canvas (no
+  `Canvas` component of its own), so its view starts **out** of the registry — tick
+  its checkbox and `BinderyViews.SettingsPanel` becomes available.
+- **Compose a sub-view** — select `Footer` and generate a view on *it* too. The
+  parent `SettingsPanelView` recomposes so `view.Footer` becomes a `FooterView`
+  (a typed sub-view) instead of a scope.
+- **Transparent wrapper** — rename `Footer` to `~Footer` before generating and
+  Bindery promotes `OkButton` / `CancelButton` straight onto `view.OkButton` /
+  `view.CancelButton` (no `Footer` scope).
+- **Rename swap** — rename `SettingsPanel` and regenerate: the old view is removed
+  and your editable stub is migrated to the new name, leaving one clean view.
+
 ## Notes
 
-- The builder is safe to run multiple times — it creates a new Canvas each
-  time, so you always get a clean hierarchy to experiment with.
-- `Footer` has no bindable component, so Bindery turns it into a `FooterScope`.
-  Its children (`OkButton`, `CancelButton`) are reached through that scope:
-  `view.Footer.OkButton`.
-- To try the `~` transparent-wrapper feature, rename `Footer` to `~Footer` in
-  the Hierarchy before generating — Bindery will promote `OkButton` and
-  `CancelButton` directly to `view.OkButton` / `view.CancelButton`.
+- The builder is safe to run multiple times — it creates a new Canvas each time, so
+  you always get a clean hierarchy to experiment with.
+- `Footer` has no bindable component, so Bindery turns it into a `FooterScope`; its
+  children (`OkButton`, `CancelButton`) are reached through it: `view.Footer.OkButton`.
