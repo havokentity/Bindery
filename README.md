@@ -164,6 +164,33 @@ deserialized) reference *and* runs the view's own `OnBind`. It's idempotent — 
 accessors all funnel through the same one-time `EnsureBound`. (The one thing that can't run early on
 an inactive object is `OnBind` work that *needs* it active, e.g. `StartCoroutine` — a Unity limit.)
 
+#### Why a listener you add to an inactive view's control still fires when it's shown
+
+A surprisingly handy consequence: from an **active** object you can reach a control on an
+**inactive** Bindery view, add a listener, and it fires the moment the view is shown — no extra
+wiring. Three plain Unity facts make that work (no reflection, no tricks):
+
+1. **The reference is always there.** Bindery wires each control into a `[SerializeField]` field at
+   edit time, and Unity deserializes serialized fields when the scene loads **whether or not the
+   GameObject is active** — inactive objects get their data, they just don't run lifecycle callbacks.
+   So `_OkButton` points at a real `Button` even while the panel is hidden.
+2. **`BinderyViews` finds inactive views on purpose** — the lookup is
+   `FindFirstObjectByType<…>(FindObjectsInactive.Include)`, so the view resolves even while hidden.
+3. **The listener lives on the *Button*, and survives deactivation.** `onClick.AddListener(…)`
+   stores a runtime callback on the Button's `UnityEvent`. Deactivating and re-activating a
+   GameObject does **not** clear runtime listeners — so when the panel is shown and clicked, the
+   callback fires. (It simply *can't* fire while hidden — you can't click inactive UI.)
+
+Two gotchas worth knowing when you lean on this:
+
+- **Duplicate listeners.** If the code that calls `AddListener` runs again — the object is
+  reinstantiated, an additive scene reloads, etc. — you'll register the handler a *second* time and
+  it fires twice. Wire it once, or `RemoveListener(...)` first.
+- **Stale registry cache on scene reload.** `BinderyViews` caches each view it finds; after loading
+  a different scene that cache can hold a destroyed reference. Call **`BinderyViews.Refresh()`** to
+  clear it (each property re-finds on next access). A destroyed/`null` cached entry is re-found
+  automatically — `Refresh()` is for proactively dropping the whole set across a scene change.
+
 ## Composing views
 
 Generate a view on a child that already lives inside another view, and the parent
