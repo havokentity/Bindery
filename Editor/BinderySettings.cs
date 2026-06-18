@@ -37,6 +37,7 @@ namespace Bindery
         [SerializeField] bool scaffoldButtonHandlers = true;
         [SerializeField] bool scaffoldControlHandlers = true;
         [SerializeField] bool serializeCollectionsAsArray = true;
+        [SerializeField] bool generateViewsRegistry = true;
 
         static BinderySettings _instance;
 
@@ -107,6 +108,11 @@ namespace Bindery
         /// as a list in the Inspector — instead of an individual <c>[SerializeField]</c> per element.
         /// On by default. Off restores the per-element fields + a cached read-only accessor.</summary>
         public static bool SerializeCollectionsAsArray => Instance.serializeCollectionsAsArray;
+
+        /// <summary>Generate the shared <c>BinderyViews</c> registry — a static class with one typed,
+        /// cached property per generated view (<c>BinderyViews.SettingsPanel</c>), kept in sync with the
+        /// set of views as they're generated/removed. On by default.</summary>
+        public static bool GenerateViewsRegistry => Instance.generateViewsRegistry;
 
         // Keep only characters legal inside a C# identifier; the suffix is appended to an
         // already-valid name, so a leading digit here is fine.
@@ -298,6 +304,23 @@ namespace Bindery
                     {
                         s.serializeCollectionsAsArray = nextArr;
                         Save();
+                    }
+
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("View registry", EditorStyles.boldLabel);
+
+                    EditorGUI.BeginChangeCheck();
+                    bool nextReg = EditorGUILayout.ToggleLeft(
+                        new GUIContent("Generate the BinderyViews registry",
+                            "Generate a shared static BinderyViews class with one typed, cached property per " +
+                            "view (BinderyViews.SettingsPanel), kept in sync as views are generated/removed. " +
+                            "Off deletes it on the next reload."),
+                        s.generateViewsRegistry);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        s.generateViewsRegistry = nextReg;
+                        Save();
+                        BinderyGenerator.RegenerateRegistry();
                     }
 
                     EditorGUILayout.Space();

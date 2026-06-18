@@ -2,6 +2,17 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.13.0] — 2026-06-18
+
+- **`BinderyViews` registry.** A single generated static class exposes every view by a typed,
+  cached property — `BinderyViews.SettingsPanel`, `BinderyViews.Hud` — each finding its view in the
+  loaded scene(s) on first use (re-found if destroyed) with a `BinderyViews.Refresh()` to clear the
+  caches after a scene change. The property name is the class name minus the suffix
+  (`SettingsPanelView` → `SettingsPanel`), disambiguated on collision. It **regenerates itself** as
+  views are added/removed (kept consistent *before* each recompile, so a removed view never leaves
+  the registry referencing a deleted type) and lives in the generated assembly + namespace. On by
+  default; **Project Settings ▸ Bindery ▸ View registry** turns it off (deleted on the next reload).
+
 ## [0.12.0] — 2026-06-18
 
 - **Visual Scripting playground (optional).** With `com.unity.visualscripting` installed,

@@ -183,6 +183,25 @@ footer.GetParentView<SettingsPanelView>().VolumeSlider.value = 1f;  // up, back 
   view via a cached `GetComponentInParent` — no runtime string lookup.
 - A `~`-transparent node still wins — it's ignored even if it carries a view.
 
+## One registry for every view
+
+Bindery keeps a single generated **`BinderyViews`** class with one typed, cached property per view —
+so you can reach any view from anywhere without a `FindObjectOfType` of your own:
+
+```csharp
+using Bindery.Generated;
+
+BinderyViews.SettingsPanel.Footer.OkButton.onClick.AddListener(Save);
+var hp = BinderyViews.Hud.PlayerHealth;     // each property is typed as its view
+```
+
+Each property finds its view in the loaded scene(s) on first use and caches it (a destroyed/reloaded
+view is re-found automatically); `BinderyViews.Refresh()` clears the caches after a scene change. The
+property name is the view's class name minus the suffix (`SettingsPanelView` → `SettingsPanel`),
+disambiguated if two would collide. The registry **regenerates itself** as you add and remove views —
+no upkeep — and lives in the same generated assembly + namespace as the views. Turn it off under
+**Project Settings ▸ Bindery ▸ View registry** (it's deleted on the next reload).
+
 ## Removing a view
 
 Select the object and hit **Bindery ▸ Remove Accessor Class** (Hierarchy right-click or the

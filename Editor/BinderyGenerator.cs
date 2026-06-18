@@ -7,10 +7,13 @@
 // the [SerializeField] references once the type exists.
 // =============================================================================
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
+using UnityEditor.Callbacks;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
@@ -25,6 +28,12 @@ namespace Bindery
         const string GeneratedDir = OutputRoot + "/Generated";
         const string AsmdefPath = OutputRoot + "/Bindery.Generated.asmdef";
         const string LegacyAsmdefPath = GeneratedDir + "/Bindery.Generated.asmdef";
+
+        // The shared typed-view registry (BinderyViews.SettingsPanel, …). It lives in — and references
+        // view types from — the one generated assembly, so listing only that assembly's views keeps it
+        // self-contained and always compilable.
+        const string GeneratedAssemblyName = "Bindery.Generated";
+        const string RegistryPath = GeneratedDir + "/BinderyViews.g.cs";
 
         [MenuItem("GameObject/Bindery/Generate Accessor Class", false, 30)]
         static void GenerateFromHierarchy(MenuCommand command)
@@ -179,6 +188,92 @@ namespace Bindery
             BinderyWire.RequestWire();
         }
 
+        // ---- the typed view registry (BinderyViews) ----------------------------------------------
+
+        [DidReloadScripts]
+        static void OnScriptsReloaded()
+        {
+            // Rebuild BinderyViews to match the generated view types now compiled. Deferred a tick so
+            // it runs after the reload settles; writing it triggers at most one further reload, which
+            // then finds the content unchanged (the registry isn't itself a view) — so it converges.
+            EditorApplication.delayCall += () => RegenerateRegistry();
+        }
+
+        /// <summary>Regenerate (or, when disabled/empty, delete) the shared <c>BinderyViews</c> registry
+        /// so it always matches the current set of generated views. <paramref name="excludeClassNames"/>
+        /// drops types about to be deleted — TypeCache still lists them until the next compile, so a
+        /// removal must exclude them here or the registry would reference a vanished type and fail to build.</summary>
+        internal static void RegenerateRegistry(ICollection<string> excludeClassNames = null)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
+            if (!BinderySettings.GenerateViewsRegistry) { DeleteRegistry(); return; }
+
+            var views = CollectRegistryViews(excludeClassNames);
+            if (views.Count == 0) { DeleteRegistry(); return; }
+
+            string code = BinderyCodeGen.EmitViewsRegistry(BinderySettings.GeneratedNamespace, views);
+            if (WriteIfChanged(RegistryPath, code))
+                AssetDatabase.ImportAsset(RegistryPath, ImportAssetOptions.ForceUpdate);
+        }
+
+        static void DeleteRegistry()
+        {
+            if (File.Exists(RegistryPath)) { DeleteAssetIfExists(RegistryPath); AssetDatabase.Refresh(); }
+        }
+
+        // Every concrete view type in the one generated assembly, paired with a property name (the class
+        // name minus the configured suffix, disambiguated on collision). Restricting to that assembly
+        // keeps the registry self-contained: it can always reference what it lists.
+        static List<(string typeName, string property)> CollectRegistryViews(ICollection<string> excludeClassNames)
+        {
+            string baseName = BinderySettings.BaseClass;
+            var types = TypeCache.GetTypesDerivedFrom<BinderyView>()
+                .Where(t => !t.IsAbstract && !t.IsGenericTypeDefinition
+                            && t.Assembly.GetName().Name == GeneratedAssemblyName
+                            && t.FullName != baseName
+                            && (excludeClassNames == null || !excludeClassNames.Contains(t.Name)))
+                .OrderBy(t => t.Name, StringComparer.Ordinal)
+                .ThenBy(t => t.FullName, StringComparer.Ordinal)
+                .ToList();
+
+            string suffix = BinderySettings.ClassSuffix;
+            var props = new string[types.Count];
+            for (int i = 0; i < types.Count; i++) props[i] = Stem(types[i].Name, suffix);
+            Disambiguate(types, props);
+
+            var list = new List<(string, string)>(types.Count);
+            for (int i = 0; i < types.Count; i++)
+                list.Add(("global::" + types[i].FullName, props[i]));
+            return list;
+        }
+
+        // Strip the configured suffix to get the friendly property name ("PanelView" → "Panel").
+        static string Stem(string className, string suffix) =>
+            !string.IsNullOrEmpty(suffix) && className.Length > suffix.Length &&
+            className.EndsWith(suffix, StringComparison.Ordinal)
+                ? className.Substring(0, className.Length - suffix.Length)
+                : className;
+
+        // On a duplicate stem fall back to the full class name; if that still collides (same simple name
+        // in two namespaces) fall back to the dotted full name with separators replaced.
+        static void Disambiguate(List<Type> types, string[] props)
+        {
+            for (int pass = 0; pass < 2; pass++)
+            {
+                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var p in props) counts[p] = counts.TryGetValue(p, out var c) ? c + 1 : 1;
+                bool clean = true;
+                for (int i = 0; i < props.Length; i++)
+                {
+                    if (counts[props[i]] <= 1) continue;
+                    clean = false;
+                    props[i] = pass == 0 ? types[i].Name : types[i].FullName.Replace('.', '_').Replace('+', '_');
+                }
+                if (clean) break;
+            }
+        }
+
         // Removes the generated view component from the selected object(s) and DELETES the class
         // files (.g.cs + editable stub). Confirms first (skipped in batch mode). Any ancestor view
         // that composed a removed view is regenerated so it no longer references a deleted type.
@@ -299,6 +394,12 @@ namespace Bindery
                 DeleteAssetIfExists(viewsDir + "/" + t.cls + ".cs");
                 DeleteAssetIfExists(GeneratedDir + "/" + t.cls + ".cs"); // legacy stub location
             }
+
+            // 4) Drop the removed types from the registry BEFORE the recompile — TypeCache still lists
+            //    them, so without the exclude the registry would reference a just-deleted type and break
+            //    the build (which would also stop the post-reload regen from ever running).
+            RegenerateRegistry(new HashSet<string>(targets.Select(t => t.cls), StringComparer.Ordinal));
+
             AssetDatabase.Refresh();
         }
 
