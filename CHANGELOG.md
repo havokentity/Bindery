@@ -2,6 +2,13 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.7.0] — 2026-06-18
+
+- **Recursive remove.** When you Remove on an object that has Bindery views nested below it, the
+  confirmation now offers **Remove all** (the selected view *and* every nested one) / **Selected
+  only** / **Cancel**. Remove also works on a view-less parent that only has nested views. Each
+  removed view still deletes its `.g.cs` + stub, and any surviving ancestor view is regenerated.
+
 ## [0.6.1] — 2026-06-18
 
 - **Fix: cyclic assembly dependency from composed views.** A view that composes a sub-view

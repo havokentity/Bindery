@@ -65,8 +65,10 @@ namespace Bindery
 
         static bool SelectionHasView()
         {
+            // Enabled when a view sits anywhere in the selection's subtree — so Remove works on a
+            // view-less parent that has nested views (recursive remove offers to cascade).
             foreach (var go in Selection.gameObjects)
-                if (go != null && go.GetComponent<BinderyView>() != null) return true;
+                if (go != null && go.GetComponentInChildren<BinderyView>(true) != null) return true;
             return false;
         }
 
@@ -158,36 +160,84 @@ namespace Bindery
         {
             if (selection == null) return;
 
-            // Targets: selected objects that actually carry a generated view (deduped).
-            var targets = new List<(GameObject go, string cls)>();
-            var seen = new HashSet<int>();
+            // Direct: selected objects that carry a view. Nested: views strictly BELOW the selection.
+            var direct = new List<(GameObject go, string cls)>();
+            var directIds = new HashSet<int>();
             foreach (var go in selection)
             {
-                if (go == null || !seen.Add(go.GetInstanceID())) continue;
+                if (go == null || !directIds.Add(go.GetInstanceID())) continue;
                 var comp = go.GetComponent<BinderyView>();
-                if (comp != null) targets.Add((go, comp.GetType().Name));
+                if (comp != null) direct.Add((go, comp.GetType().Name));
             }
 
-            if (targets.Count == 0)
+            var nested = new List<(GameObject go, string cls)>();
+            var nestedSeen = new HashSet<int>(directIds);   // skip the direct ones (and dedupe across selection)
+            foreach (var go in selection)
             {
-                EditorUtility.DisplayDialog("Bindery", "The selection has no Bindery view to remove.", "OK");
+                if (go == null) continue;
+                foreach (var v in go.GetComponentsInChildren<BinderyView>(true))
+                    if (v != null && nestedSeen.Add(v.gameObject.GetInstanceID()))
+                        nested.Add((v.gameObject, v.GetType().Name));
+            }
+
+            if (direct.Count == 0 && nested.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Bindery", "No Bindery view on the selection or below it.", "OK");
                 return;
             }
 
+            // Pick the set to remove. When views exist nested below, offer to cascade.
+            List<(GameObject go, string cls)> toRemove;
+            if (nested.Count == 0)
+            {
+                if (!Application.isBatchMode &&
+                    !EditorUtility.DisplayDialog("Remove Bindery view?", RemoveMessage(direct), "Remove", "Cancel"))
+                    return;
+                toRemove = direct;
+            }
+            else if (direct.Count == 0)   // selection has no view itself, only nested ones below
+            {
+                if (!Application.isBatchMode &&
+                    !EditorUtility.DisplayDialog("Remove Bindery views?", RemoveMessage(nested), "Remove", "Cancel"))
+                    return;
+                toRemove = nested;
+            }
+            else
+            {
+                var all = new List<(GameObject go, string cls)>(direct);
+                all.AddRange(nested);
+                int choice = Application.isBatchMode ? 0 : EditorUtility.DisplayDialogComplex(
+                    "Remove Bindery views?",
+                    RemoveMessage(all) + "\n\nThere " + (nested.Count == 1 ? "is 1 view" : "are " + nested.Count + " views") +
+                        " nested below the selection. Remove everything, or only the selected view(s)?",
+                    "Remove all (" + all.Count + ")", "Cancel", "Selected only (" + direct.Count + ")");
+                if (choice == 1) return;                   // Cancel
+                toRemove = choice == 2 ? direct : all;     // 2 = Selected only, 0 = Remove all
+            }
+
+            RemoveTargets(toRemove);
+        }
+
+        // The confirmation body listing the views about to be removed.
+        static string RemoveMessage(List<(GameObject go, string cls)> targets)
+        {
             var msg = new StringBuilder();
             msg.Append("Remove ").Append(targets.Count).Append(targets.Count == 1 ? " Bindery view" : " Bindery views")
                .Append(" and DELETE the generated class file(s)?\n");
             foreach (var t in targets) msg.Append("\n   • ").Append(t.cls).Append("   (on '").Append(t.go.name).Append("')");
             msg.Append("\n\nThis deletes the .g.cs AND the editable view stub (including any code you ")
                .Append("added there). The deleted files cannot be recovered.");
+            return msg.ToString();
+        }
 
-            if (!Application.isBatchMode && !EditorUtility.DisplayDialog("Remove Bindery view?", msg.ToString(), "Remove", "Cancel"))
-                return;
-
-            // Ancestor views that compose a target must be regenerated (so they fall back to walking
-            // the now-viewless subtree). Exclude targets themselves. Collect BEFORE removing.
+        // Detach each view component and delete its class files; regenerate any ancestor view that
+        // ISN'T itself being removed (so it stops referencing a deleted type). Shared by every path.
+        static void RemoveTargets(List<(GameObject go, string cls)> targets)
+        {
             var targetIds = new HashSet<int>();
             foreach (var t in targets) targetIds.Add(t.go.GetInstanceID());
+
+            // Ancestor views above the removed set must be regenerated (collected BEFORE removing).
             var regen = new List<GameObject>();
             var regenSeen = new HashSet<int>();
             foreach (var t in targets)
@@ -206,8 +256,8 @@ namespace Bindery
                 Debug.Log($"[Bindery] Removed view {t.cls} from '{t.go.name}'.", t.go);
             }
 
-            // 2) Recompose ancestors first — now their .g.cs no longer references the removed types,
-            //    so 3) can delete those files without leaving a dangling reference.
+            // 2) Recompose surviving ancestors first — now their .g.cs no longer references the removed
+            //    types, so 3) can delete those files without leaving a dangling reference.
             if (regen.Count > 0) Generate(regen.ToArray());
 
             // 3) Delete the removed views' class files.

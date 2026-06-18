@@ -189,6 +189,11 @@ and your editable `<Name>View.cs` stub (so back up any `OnBind` code first; the 
 undone). If an ancestor view was composing the one you remove, it's regenerated automatically so it
 stops referencing the deleted type (the subtree falls back to a normal scope).
 
+If there are views **nested below** what you're removing, the confirmation offers **Remove all**
+(the selected view plus every nested one) / **Selected only** / **Cancel** — so you can clear a
+whole panel's worth of views in one go. Remove also works on a view-less parent that just has
+nested views.
+
 A generated view's **inspector** also carries **Regenerate** and **Remove View** buttons and warns
 when a wired reference has gone missing — so the whole loop is reachable without the menus.
 **`Tools ▸ Bindery ▸ Validate Views in Scene`** scans every view (including inactive) and logs a
