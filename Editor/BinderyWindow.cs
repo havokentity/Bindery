@@ -99,6 +99,11 @@ namespace Bindery
                     Defer(() => { EditorApplication.ExecuteMenuItem("Tools/Bindery/Regenerate All Views"); Rescan(); });
                 if (GUILayout.Button("Validate", EditorStyles.toolbarButton))
                     EditorApplication.ExecuteMenuItem("Tools/Bindery/Validate Views in Scene");
+                // Only when the optional Visual Scripting integration is installed (detected by reflection
+                // so Bindery.Editor never references Visual Scripting itself).
+                if (VisualScriptingAvailable &&
+                    GUILayout.Button(new GUIContent("Visual Script", "Generate a Visual Scripting playground graph for these views"), EditorStyles.toolbarButton))
+                    Defer(() => EditorApplication.ExecuteMenuItem("Tools/Bindery/Generate Visual Script Playground"));
             }
 
             if (_rows.Count == 0)
@@ -148,6 +153,12 @@ namespace Bindery
 
         // Regenerate/Remove touch the asset database and can recompile — defer past OnGUI.
         static void Defer(System.Action a) => EditorApplication.delayCall += () => a();
+
+        // True when com.unity.visualscripting is installed — checked by reflection so this assembly
+        // never references Visual Scripting (the generator lives in an optional, constraint-gated asmdef).
+        static bool? _vs;
+        static bool VisualScriptingAvailable =>
+            _vs ??= System.Type.GetType("Unity.VisualScripting.ScriptGraphAsset, Unity.VisualScripting.Flow") != null;
 
         static string HierarchyPath(Transform t)
         {

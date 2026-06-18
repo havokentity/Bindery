@@ -1,0 +1,29 @@
+{
+  "name": "Bindery.VisualScripting.Editor",
+  "rootNamespace": "Bindery.VisualScripting",
+  "references": [
+    "Bindery.Editor",
+    "Bindery.Runtime",
+    "Unity.VisualScripting.Core",
+    "Unity.VisualScripting.Flow"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "BINDERY_VISUAL_SCRIPTING"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.visualscripting",
+      "expression": "",
+      "define": "BINDERY_VISUAL_SCRIPTING"
+    }
+  ],
+  "noEngineReferences": false
+}

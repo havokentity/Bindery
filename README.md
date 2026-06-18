@@ -221,6 +221,24 @@ The toolbar adds **Regenerate All** and **Validate** for the whole set, and **Re
 (scanning every prefab isn't free, so the list refreshes on open, on focus, and on demand). Handy on
 larger projects where views are scattered across scenes and prefabs.
 
+## Visual Scripting playground
+
+If your project has **Unity Visual Scripting** installed (`com.unity.visualscripting`), Bindery can
+hand you a ready-to-poke Bolt graph. **`Tools ▸ Bindery ▸ Generate Visual Script Playground`** (or
+the **Visual Script** button in the Bindery Views window) builds a `ScriptGraphAsset` in your views
+folder with, for every view type in the open scene(s):
+
+- a **Start** event that fans out through each view,
+- a **`FindFirstObjectByType`** node that grabs the live view at runtime (and a **`Debug.Log`** of
+  it so the graph does something the moment you press Play), and
+- a **`Get Member`** node per accessor, already wired to that view — so `Save`, `Footer`, `Slots` …
+  are sitting on the canvas, typed and connected, ready to drag into your own logic.
+
+It's a starting point, not a finished machine — open it in the **Script Graph** window and play.
+This integration is **entirely optional**: the generator lives in its own assembly that only
+compiles when Visual Scripting is present, so plain Bindery never depends on it (and the menu /
+button simply don't appear without it).
+
 ## Custom components
 
 Built-in uGUI isn't the whole story. Mark any of your own MonoBehaviours with `[BinderyBind]` and

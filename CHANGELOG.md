@@ -2,6 +2,19 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.12.0] — 2026-06-18
+
+- **Visual Scripting playground (optional).** With `com.unity.visualscripting` installed,
+  `Tools ▸ Bindery ▸ Generate Visual Script Playground` (and a **Visual Script** button in the
+  Bindery Views window) builds a Bolt `ScriptGraphAsset` pre-populated with sample nodes for every
+  view in the open scene(s): a **Start** event, a **`FindFirstObjectByType`** + **`Debug.Log`** per
+  view, and a **`Get Member`** node per accessor already wired to the live view — a ready-to-poke
+  starting point you open in the Script Graph window.
+- **Stays dependency-free.** The generator lives in its own assembly gated by an
+  `com.unity.visualscripting` version define, so Bindery takes **no** hard dependency on Visual
+  Scripting — the menu and button only appear when the package is present, and the package compiles
+  identically without it.
+
 ## [0.11.0] — 2026-06-18
 
 - **Bindery Views window.** `Window ▸ Bindery ▸ Views` opens one panel listing every generated view

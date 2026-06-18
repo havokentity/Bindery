@@ -1,7 +1,7 @@
 {
   "name": "com.bindery.unity",
   "displayName": "Bindery",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "unity": "2022.3",
   "description": "Select any GameObject or Canvas in the Hierarchy and Bindery generates a strongly-typed C# accessor (view) component for its built-in uGUI children: auto-wired [SerializeField] references, nested scopes for containers, no reflection or string lookups at runtime.",
   "keywords": ["ui", "ugui", "codegen", "accessor", "bindings", "editor"],
