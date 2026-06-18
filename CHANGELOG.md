@@ -2,6 +2,15 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.17.0] — 2026-06-18
+
+- **Cleaner generated code — short type names.** Built-in uGUI / TMP / `UnityEngine` types are now
+  emitted bare (`public Button Go`, `IReadOnlyList<Button> Slots`) with the matching `using`s at the
+  top, instead of fully qualified (`UnityEngine.UI.Button`). Sub-views shorten for free (same
+  namespace); your own `[BinderyBind]` components stay fully qualified so no namespace can collide.
+  The `using`s emitted are exactly the ones used (UnityEngine always, plus UnityEngine.UI / TMPro /
+  System.Collections.Generic as needed). Re-run a view (or **Regenerate All**) to pick up the new style.
+
 ## [0.16.0] — 2026-06-18
 
 - **Bindery Tools frame in the window.** The Bindery Views window now has a grouped **Bindery Tools**

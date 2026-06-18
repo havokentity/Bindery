@@ -55,30 +55,40 @@ Bindery generates `SettingsPanelView.g.cs` (accessor names mirror the GameObject
 casing preserved):
 
 ```csharp
-public partial class SettingsPanelView : Bindery.BinderyView
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+namespace Bindery.Generated
 {
-    [SerializeField] TMPro.TMP_Text _Title;
-    [SerializeField] UnityEngine.UI.Slider _VolumeSlider;
-    [SerializeField] UnityEngine.RectTransform _Footer;
-    FooterScope _FooterScope;
-    [SerializeField] UnityEngine.UI.Button _OkButton;
-    [SerializeField] UnityEngine.UI.Button _CancelButton;
-
-    public TMPro.TMP_Text Title => _Title;
-    public UnityEngine.UI.Slider VolumeSlider => _VolumeSlider;
-    public FooterScope Footer => _FooterScope ??= new FooterScope(this);
-
-    public sealed class FooterScope
+    public partial class SettingsPanelView : Bindery.BinderyView
     {
-        readonly SettingsPanelView _view;
-        internal FooterScope(SettingsPanelView view) { _view = view; }
-        public RectTransform RectTransform => _view._Footer;
-        public GameObject GameObject => _view._Footer != null ? _view._Footer.gameObject : null;
-        public UnityEngine.UI.Button OkButton => _view._OkButton;
-        public UnityEngine.UI.Button CancelButton => _view._CancelButton;
+        [SerializeField] TMP_Text _Title;
+        [SerializeField] Slider _VolumeSlider;
+        [SerializeField] RectTransform _Footer;
+        FooterScope _FooterScope;
+        [SerializeField] Button _OkButton;
+        [SerializeField] Button _CancelButton;
+
+        public TMP_Text Title => _Title;
+        public Slider VolumeSlider => _VolumeSlider;
+        public FooterScope Footer => _FooterScope ??= new FooterScope(this);
+
+        public sealed class FooterScope
+        {
+            readonly SettingsPanelView _view;
+            internal FooterScope(SettingsPanelView view) { _view = view; }
+            public RectTransform RectTransform => _view._Footer;
+            public Button OkButton => _view._OkButton;
+            public Button CancelButton => _view._CancelButton;
+        }
     }
 }
 ```
+
+Built-in uGUI / TMP types are emitted bare (`Button`, not `UnityEngine.UI.Button`) under the file's
+`using`s; your own `[BinderyBind]` components stay fully qualified. Each accessor also calls
+`EnsureBound()` before returning (elided above for brevity — see [Binding is lazy](#binding-is-lazy--inactive-views-included)).
 
 …attaches `SettingsPanelView` to the `SettingsPanel` GameObject, and fills
 `_Title`, `_VolumeSlider`, `_Footer`, `_OkButton`, `_CancelButton` automatically.
