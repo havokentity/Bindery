@@ -294,8 +294,9 @@ hierarchy into the active scene — one menu click from a live generated view.
 
 ## Notes & limits (v1)
 
-- Works on **scene objects and prefab instances**. A prefab *asset* selected in the
-  Project window is skipped — open it in a scene first.
+- Works on **scene objects, prefab instances, and prefab *assets***. Select a prefab in the
+  Project window and generate — the view is attached to the prefab and its references are wired
+  by relative path (no need to open it in a scene first).
 - A container that is itself an `Image` (e.g. a card panel) is bound as a
   `RectTransform` scope; its own `Image` is not surfaced separately.
 - `ScrollRect` is a leaf — bind its `Content` object directly if you need its items.

@@ -31,7 +31,9 @@ namespace Bindery
         // flag is needed because JsonUtility turns a null string[] into an empty [] on round-trip,
         // so "gids != null" can't tell a single member from an array member.
         [Serializable] class PMember { public string field; public string gid; public string type; public string[] gids; public bool isArray; }
-        [Serializable] class PView { public string rootGid; public string typeName; public List<PMember> members = new List<PMember>(); }
+        // rootGid wires a SCENE object; prefabPath (non-empty) wires a PREFAB ASSET — its members
+        // then carry relative hierarchy paths (gid/gids) instead of GlobalObjectIds.
+        [Serializable] class PView { public string rootGid; public string prefabPath; public string typeName; public List<PMember> members = new List<PMember>(); }
         [Serializable] class PSet { public List<PView> views = new List<PView>(); }
 
         static bool _pending;
@@ -47,38 +49,43 @@ namespace Bindery
             // Fully-qualified type name must use the SAME namespace the .g.cs was emitted with
             // (BinderySettings.GeneratedNamespace, carried on the model) so ResolveType finds it.
             var ns = string.IsNullOrEmpty(m.namespaceName) ? BinderyCodeGen.GeneratedNamespace : m.namespaceName;
+            bool prefab = m.isPrefabAsset;
             var pv = new PView
             {
-                rootGid = GidOf(m.root.gameObject),
+                rootGid = prefab ? null : GidOf(m.root.gameObject),
+                prefabPath = prefab ? m.prefabPath : null,
                 typeName = ns + "." + m.className,
             };
+            // Scene members carry GlobalObjectIds; prefab-asset members carry relative hierarchy paths
+            // (resolved against a fresh LoadPrefabContents copy, where GlobalObjectIds don't apply).
             foreach (var mem in m.members)
             {
                 if (m.collectionsAsArray && mem.IsCollected)
                 {
                     if (!mem.collectionLead) continue;   // one array PMember per collection, on the lead
-                    pv.members.Add(new PMember { field = "_" + mem.collectionName, type = mem.csharpType, gids = CollectionGids(m, mem), isArray = true });
+                    var elems = CollectionElements(m, mem);
+                    var refs = new string[elems.Count];
+                    for (int i = 0; i < elems.Count; i++) refs[i] = prefab ? elems[i].path : GidOf(elems[i].node.gameObject);
+                    pv.members.Add(new PMember { field = "_" + mem.collectionName, type = mem.csharpType, gids = refs, isArray = true });
                 }
                 else
-                    pv.members.Add(new PMember { field = mem.FieldName, gid = GidOf(mem.node.gameObject), type = mem.csharpType });
+                    pv.members.Add(new PMember { field = mem.FieldName, type = mem.csharpType, gid = prefab ? mem.path : GidOf(mem.node.gameObject) });
             }
 
-            set.views.RemoveAll(v => v.rootGid == pv.rootGid && v.typeName == pv.typeName);
+            set.views.RemoveAll(v => v.typeName == pv.typeName && v.rootGid == pv.rootGid && v.prefabPath == pv.prefabPath);
             set.views.Add(pv);
             Save(set);
         }
 
-        // The GlobalObjectIds of a collection's elements (the lead's group), in element-index order.
-        static string[] CollectionGids(ViewModel m, ViewMember lead)
+        // A collection's elements (the lead's group), in element-index order.
+        static List<ViewMember> CollectionElements(ViewModel m, ViewMember lead)
         {
             var group = new List<ViewMember>();
             foreach (var e in m.members)
                 if (e.collectionName == lead.collectionName && e.parent == lead.parent && e.csharpType == lead.csharpType)
                     group.Add(e);
             group.Sort((a, b) => a.collectionIndex.CompareTo(b.collectionIndex));
-            var gids = new string[group.Count];
-            for (int i = 0; i < group.Count; i++) gids[i] = GidOf(group[i].node.gameObject);
-            return gids;
+            return group;
         }
 
         /// <summary>Process the queue on the next tick (coalesced). Called after a Refresh and
@@ -101,7 +108,7 @@ namespace Bindery
                 var type = ResolveType(v.typeName);
                 if (type == null) { remaining.Add(v); continue; }     // not compiled yet — retry next reload
                 bool wired;
-                try { wired = Wire(v, type); }
+                try { wired = string.IsNullOrEmpty(v.prefabPath) ? Wire(v, type) : WirePrefab(v, type); }
                 catch (Exception e)
                 {
                     // A transient failure (e.g. a stale serialized layout mid-recompile) must not abort
@@ -168,6 +175,58 @@ namespace Bindery
             if (!Application.isPlaying && rootGo.scene.IsValid())
                 EditorSceneManager.MarkSceneDirty(rootGo.scene);
             return true;
+        }
+
+        // Wire a PREFAB ASSET: load an editable copy of its contents, attach the view to the root and
+        // resolve every reference by RELATIVE PATH (GlobalObjectIds don't apply to the loaded copy),
+        // then save the prefab. Members carry paths instead of GIDs.
+        static bool WirePrefab(PView v, Type type)
+        {
+            foreach (var m in v.members)
+                if (ResolveType(m.type) == null) return false;   // member types not compiled yet — retry
+
+            var root = PrefabUtility.LoadPrefabContents(v.prefabPath);
+            if (root == null) return false;
+            try
+            {
+                var comp = root.GetComponent(type) ?? root.AddComponent(type);
+                if (comp == null) return false;
+
+                var so = new SerializedObject(comp);
+                foreach (var m in v.members)
+                    if (so.FindProperty(m.field) == null) return false;
+
+                bool resized = false;
+                foreach (var m in v.members)
+                    if (m.isArray) { so.FindProperty(m.field).arraySize = m.gids.Length; resized = true; }
+                if (resized) { so.ApplyModifiedPropertiesWithoutUndo(); so.Update(); }
+
+                foreach (var m in v.members)
+                {
+                    var prop = so.FindProperty(m.field);
+                    if (m.isArray)
+                        for (int i = 0; i < m.gids.Length; i++)
+                            prop.GetArrayElementAtIndex(i).objectReferenceValue = ResolveInPrefab(root, m.gids[i], m.type);
+                    else
+                        prop.objectReferenceValue = ResolveInPrefab(root, m.gid, m.type);
+                }
+                so.ApplyModifiedPropertiesWithoutUndo();
+
+                PrefabUtility.SaveAsPrefabAsset(root, v.prefabPath);
+                return true;
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
+        // Resolve a member inside loaded prefab contents by its relative path ("" = the root itself).
+        static UnityEngine.Object ResolveInPrefab(GameObject root, string relPath, string type)
+        {
+            var t = string.IsNullOrEmpty(relPath) ? root.transform : root.transform.Find(relPath);
+            if (t == null) return null;
+            var ct = ResolveType(type);
+            if (ct == null) return null;
+            if (ct == typeof(RectTransform)) return t.GetComponent<RectTransform>();
+            return t.GetComponent(ct);
         }
 
         // After attaching a freshly-generated view, point out any older generated view still

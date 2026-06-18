@@ -146,6 +146,11 @@ namespace Bindery
                     model.namespaceName = namespaceName;
                     model.baseClass = baseClass;
                     model.collectionsAsArray = BinderySettings.SerializeCollectionsAsArray;
+                    if (!go.scene.IsValid() && PrefabUtility.IsPartOfPrefabAsset(go))
+                    {
+                        model.isPrefabAsset = true;
+                        model.prefabPath = AssetDatabase.GetAssetPath(go);
+                    }
                     if (model.members.Count == 0)
                     {
                         Debug.LogWarning($"[Bindery] '{go.name}' has no bindable children — nothing to generate.");
@@ -301,9 +306,9 @@ namespace Bindery
         static bool AddRoot(GameObject go, List<GameObject> worklist, HashSet<int> seen)
         {
             if (go == null || !seen.Add(go.GetInstanceID())) return false;
-            if (!go.scene.IsValid())
+            if (!go.scene.IsValid() && !PrefabUtility.IsPartOfPrefabAsset(go))
             {
-                Debug.LogWarning($"[Bindery] '{go.name}' is a project asset, not a scene object — open it in a scene first. Skipped.");
+                Debug.LogWarning($"[Bindery] '{go.name}' is a project asset that isn't a prefab — open it in a scene first. Skipped.");
                 return false;
             }
             if (BinderyTypeMap.Classify(go, out _) == BindKind.Control)

@@ -2,6 +2,13 @@
 
 All notable changes to Bindery are documented here.
 
+## [0.10.0] — 2026-06-18
+
+- **Generate on prefab assets.** Select a prefab in the Project window and **Generate Accessor
+  Class** — no need to open it in a scene first. The view component is attached to the prefab and
+  its references are wired by relative path (via `LoadPrefabContents` / `SaveAsPrefabAsset`), since
+  the deferred post-compile wiring can't hold prefab contents across a recompile.
+
 ## [0.9.0] — 2026-06-18
 
 - **Collections serialize as a single array.** A detected collection (`Slot0, Slot1, …`) now
